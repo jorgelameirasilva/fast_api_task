@@ -6,7 +6,7 @@ from app.schemas.task import TaskCreate
 
 def test_create_task(db: Session):
     task_in = TaskCreate(
-        title="Test Task", description="Test Description", is_completed=False
+        title="Test Task", description="Test Description"
     )
     task = task_repository.create(db, obj_in=task_in)
 

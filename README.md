@@ -61,3 +61,8 @@ pytest
 ```bash
 alembic revision --autogenerate -m "My new migration"
 ```
+
+
+1 - alembic init alembic
+2 - alembic revision --autogenerate -m "create init tables"
+3 - alembic upgrade head
