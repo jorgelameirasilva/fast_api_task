@@ -1,13 +1,13 @@
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.db.models.task import Task
 from app.db.repositories.base import BaseRepository
-from app.schemas.task import TaskCreate
+from app.schemas.task import TaskCreate, TaskUpdate
 
 
-class TaskRepository(BaseRepository[Task, TaskCreate]):
+class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
     """Repository for Task operations"""
 
     def __init__(self):

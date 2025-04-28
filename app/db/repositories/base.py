@@ -1,4 +1,4 @@
-from typing import Generic, List, Optional, Type, TypeVar
+from typing import Generic, Optional, Type, TypeVar, Union, Any
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
@@ -8,9 +8,10 @@ from app.db.models.base import Base
 
 ModelType = TypeVar("ModelType", bound=Base)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
+UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
-class BaseRepository(Generic[ModelType, CreateSchemaType]):
+class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     """
     Base class for all repositories, providing CRUD operations
     """
@@ -24,7 +25,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType]):
 
     def get_all(
         self, db: Session, *, skip: int = 0, limit: int = 100
-    ) -> List[ModelType]:
+    ) -> list[ModelType]:
         """Get all records with pagination"""
         return db.query(self.model).offset(skip).limit(limit).all()
 
@@ -36,3 +37,34 @@ class BaseRepository(Generic[ModelType, CreateSchemaType]):
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def update(
+        self,
+        db: Session,
+        *,
+        db_obj: ModelType,
+        obj_in: Union[UpdateSchemaType, dict[str, Any]]
+    ) -> ModelType:
+        """Update a record"""
+        obj_data = jsonable_encoder(db_obj)
+        if isinstance(obj_in, dict):
+            update_data = obj_in
+        else:
+            update_data = obj_in.model_dump(exclude_unset=True)
+
+        # Only update fields that are set in the input
+        for field in obj_data:
+            if field in update_data:
+                setattr(db_obj, field, update_data[field])
+
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def remove(self, db: Session, *, id: int) -> ModelType:
+        """Remove a record"""
+        obj = db.query(self.model).get(id)
+        db.delete(obj)
+        db.commit()
+        return obj

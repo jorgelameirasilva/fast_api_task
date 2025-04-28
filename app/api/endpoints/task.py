@@ -21,7 +21,6 @@ async def get_tasks(
     return tasks
 
 
-
 @router.get("/{task_id}", response_model=Task, status_code=status.HTTP_200_OK)
 async def get_task(task_id: int, db: Session = Depends(get_db)):
     """

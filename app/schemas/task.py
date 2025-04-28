@@ -21,6 +21,14 @@ class TaskCreate(TaskBase):
     pass
 
 
+class TaskUpdate(TaskBase):
+    """Schema for updating a Task"""
+
+    title: Optional[str] = Field(
+        None, min_length=1, max_length=100, description="The title of the task"
+    )
+
+
 class TaskInDBBase(TaskBase):
     """Schema for Task stored in DB"""
 

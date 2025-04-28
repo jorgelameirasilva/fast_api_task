@@ -5,9 +5,7 @@ from app.schemas.task import TaskCreate
 
 
 def test_create_task(db: Session):
-    task_in = TaskCreate(
-        title="Test Task", description="Test Description"
-    )
+    task_in = TaskCreate(title="Test Task", description="Test Description")
     task = task_repository.create(db, obj_in=task_in)
 
     assert task.title == "Test Task"
@@ -16,9 +14,7 @@ def test_create_task(db: Session):
 
 
 def test_get_task(db: Session):
-    task_in = TaskCreate(
-        title="Test Task", description="Test Description"
-    )
+    task_in = TaskCreate(title="Test Task", description="Test Description")
     created_task = task_repository.create(db, obj_in=task_in)
 
     task = task_repository.get(db, id=created_task.id)

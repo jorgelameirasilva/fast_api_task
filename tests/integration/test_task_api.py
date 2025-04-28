@@ -42,4 +42,3 @@ def test_get_all_tasks(client: TestClient):
     titles = [task["title"] for task in data]
     assert "Task 1" in titles
     assert "Task 2" in titles
-
