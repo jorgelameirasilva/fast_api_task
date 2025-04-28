@@ -1,4 +1,3 @@
-import os
 import pytest
 from typing import Generator, Dict, Any
 
