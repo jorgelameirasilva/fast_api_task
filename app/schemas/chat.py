@@ -66,14 +66,26 @@ class AskResponse(BaseModel):
 class VoteRequest(BaseModel):
     """Schema for vote/feedback requests"""
 
-    user_query: str = Field(..., description="The original user query")
+    user_query: str = Field(..., min_length=1, description="The original user query")
     chatbot_response: str = Field(
-        ..., description="The chatbot response being voted on"
+        ..., min_length=1, description="The chatbot response being voted on"
     )
-    count: int = Field(..., description="Vote count")
+    count: int = Field(..., ge=0, description="Vote count (must be non-negative)")
     upvote: bool = Field(
         ..., description="Whether this is an upvote (True) or downvote (False)"
     )
+
+    # Additional optional fields for enhanced feedback
+    downvote: Optional[bool] = Field(None, description="Explicit downvote flag")
+    reason_multiple_choice: Optional[str] = Field(
+        None, description="Predefined reason for the vote"
+    )
+    additional_comments: Optional[str] = Field(
+        None, description="Additional user comments"
+    )
+    date: Optional[str] = Field(None, description="Date of the vote")
+    time: Optional[str] = Field(None, description="Time of the vote")
+    email_address: Optional[str] = Field(None, description="User's email address")
 
 
 class VoteResponse(BaseModel):

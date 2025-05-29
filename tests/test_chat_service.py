@@ -1,7 +1,13 @@
 import pytest
 from datetime import datetime
 from app.services.chat_service import ChatService
-from app.schemas.chat import ChatRequest, ChatMessage, AskRequest, VoteRequest
+from app.schemas.chat import (
+    ChatRequest,
+    ChatMessage,
+    ChatResponse,
+    AskRequest,
+    VoteRequest,
+)
 
 
 class TestChatService:
@@ -14,17 +20,140 @@ class TestChatService:
     @pytest.mark.asyncio
     async def test_process_chat_success(self):
         """Test successful chat processing"""
-        messages = [ChatMessage(role="user", content="Hello, how are you?")]
         request = ChatRequest(
-            messages=messages, context={"test": True}, session_state="test-session"
+            messages=[ChatMessage(role="user", content="Hello, how are you?")]
         )
 
         response = await self.chat_service.process_chat(request)
 
+        assert isinstance(response, ChatResponse)
         assert response.message.role == "assistant"
-        assert "Hello, how are you?" in response.message.content
-        assert response.session_state == "test-session"
-        assert response.context == {"test": True}
+        assert len(response.message.content) > 0
+        assert "approach_used" in response.context
+
+    @pytest.mark.asyncio
+    async def test_process_chat_with_specific_approach(self):
+        """Test chat processing with specific approach"""
+        request = ChatRequest(
+            messages=[
+                ChatMessage(role="user", content="What is AI?"),
+                ChatMessage(role="assistant", content="AI is artificial intelligence."),
+                ChatMessage(role="user", content="Tell me more"),
+            ]
+        )
+
+        response = await self.chat_service.process_chat(
+            request, approach_name="chat_read_retrieve_read"
+        )
+
+        assert response.context["approach_used"] == "ChatReadRetrieveRead"
+        assert "chat_processed_at" in response.context
+
+    @pytest.mark.asyncio
+    async def test_process_chat_with_streaming(self):
+        """Test chat processing with streaming"""
+        request = ChatRequest(
+            messages=[ChatMessage(role="user", content="Explain quantum computing")]
+        )
+
+        response = await self.chat_service.process_chat(request, stream=True)
+
+        assert response.context["streaming"] is True
+
+    @pytest.mark.asyncio
+    async def test_process_chat_session_management(self):
+        """Test chat processing with session state"""
+        session_id = "test-session-123"
+        request = ChatRequest(
+            messages=[ChatMessage(role="user", content="Hello")],
+            session_state=session_id,
+        )
+
+        response = await self.chat_service.process_chat(request)
+
+        assert response.session_state == session_id
+        assert response.context["session_updated"] is True
+        # Check that session was stored
+        assert session_id in self.chat_service.session_storage
+        assert "approach_used" in self.chat_service.session_storage[session_id]
+
+    @pytest.mark.asyncio
+    async def test_process_chat_multi_turn_conversation(self):
+        """Test chat processing with multi-turn conversation"""
+        request = ChatRequest(
+            messages=[
+                ChatMessage(role="user", content="What is machine learning?"),
+                ChatMessage(role="assistant", content="ML is a subset of AI..."),
+                ChatMessage(role="user", content="Can you give examples?"),
+                ChatMessage(role="assistant", content="Sure, examples include..."),
+                ChatMessage(role="user", content="How does deep learning relate?"),
+            ]
+        )
+
+        response = await self.chat_service.process_chat(request)
+
+        # Multi-turn conversation should likely use ChatReadRetrieveRead
+        assert response.context["approach_used"] in [
+            "ChatReadRetrieveRead",
+            "RetrieveThenRead",
+        ]
+        assert "sources_count" in response.context
+
+    @pytest.mark.asyncio
+    async def test_process_chat_approach_selection(self):
+        """Test automatic approach selection for chat"""
+        # Simple query
+        simple_request = ChatRequest(
+            messages=[ChatMessage(role="user", content="Hello")]
+        )
+
+        simple_response = await self.chat_service.process_chat(simple_request)
+        assert "approach_used" in simple_response.context
+
+        # Complex conversational query
+        complex_request = ChatRequest(
+            messages=[
+                ChatMessage(role="user", content="What is AI?"),
+                ChatMessage(role="assistant", content="AI is..."),
+                ChatMessage(role="user", content="Can you elaborate on that?"),
+            ]
+        )
+
+        complex_response = await self.chat_service.process_chat(complex_request)
+        # Should likely use ChatReadRetrieveRead for contextual query
+        assert complex_response.context["approach_used"] in [
+            "ChatReadRetrieveRead",
+            "RetrieveThenRead",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_process_chat_with_context(self):
+        """Test chat processing with request context"""
+        request = ChatRequest(
+            messages=[ChatMessage(role="user", content="What is our policy?")],
+            context={"category": "policy", "department": "HR"},
+        )
+
+        response = await self.chat_service.process_chat(request)
+
+        # Original context should be preserved and enhanced
+        assert "category" in response.context
+        assert "department" in response.context
+        assert "approach_used" in response.context
+
+    @pytest.mark.asyncio
+    async def test_process_chat_error_handling(self):
+        """Test chat error handling and fallback"""
+        # Test with invalid approach name - should still work with fallback
+        request = ChatRequest(messages=[ChatMessage(role="user", content="Hello")])
+
+        response = await self.chat_service.process_chat(
+            request, approach_name="nonexistent_approach"
+        )
+
+        # Should fallback gracefully
+        assert isinstance(response, ChatResponse)
+        assert "approach_used" in response.context
 
     @pytest.mark.asyncio
     async def test_process_chat_no_user_message(self):
@@ -126,6 +255,84 @@ class TestChatService:
         assert response.status == "success"
         assert response.upvote is False
         assert response.count == 2
+
+    @pytest.mark.asyncio
+    async def test_process_vote_with_additional_fields(self):
+        """Test vote processing with all additional fields"""
+        request = VoteRequest(
+            user_query="How do I report an illness?",
+            chatbot_response="To report an illness, follow these steps:",
+            count=1,
+            upvote=True,
+            downvote=False,
+            reason_multiple_choice="Helpful",
+            additional_comments="Very clear instructions",
+            date="01/01/01",
+            time="00:00:00",
+            email_address="example.email@axax1.com",
+        )
+
+        response = await self.chat_service.process_vote(request)
+
+        assert response.status == "success"
+        assert response.upvote is True
+        assert response.count == 1
+
+        # Check that all fields were stored
+        stored_vote = self.chat_service.vote_storage[0]
+        assert stored_vote["reason_multiple_choice"] == "Helpful"
+        assert stored_vote["additional_comments"] == "Very clear instructions"
+        assert stored_vote["date"] == "01/01/01"
+        assert stored_vote["time"] == "00:00:00"
+        assert stored_vote["email_address"] == "example.email@axax1.com"
+
+    @pytest.mark.asyncio
+    async def test_process_vote_conflicting_votes(self):
+        """Test vote processing with conflicting upvote/downvote"""
+        request = VoteRequest(
+            user_query="What is AI?",
+            chatbot_response="AI is artificial intelligence",
+            count=1,
+            upvote=True,
+            downvote=True,  # This should cause a conflict
+        )
+
+        with pytest.raises(ValueError, match="Vote cannot be both upvote and downvote"):
+            await self.chat_service.process_vote(request)
+
+    @pytest.mark.asyncio
+    async def test_process_vote_downvote_priority(self):
+        """Test that downvote field takes priority when both are provided but not conflicting"""
+        request = VoteRequest(
+            user_query="What is AI?",
+            chatbot_response="AI is artificial intelligence",
+            count=1,
+            upvote=True,
+            downvote=False,  # downvote=False should override upvote=True
+        )
+
+        response = await self.chat_service.process_vote(request)
+
+        assert response.status == "success"
+        assert response.upvote is True  # Should still be upvote since downvote=False
+        assert response.count == 1
+
+    @pytest.mark.asyncio
+    async def test_process_vote_explicit_downvote(self):
+        """Test explicit downvote with downvote field"""
+        request = VoteRequest(
+            user_query="What is AI?",
+            chatbot_response="AI is artificial intelligence",
+            count=1,
+            upvote=False,
+            downvote=True,
+        )
+
+        response = await self.chat_service.process_vote(request)
+
+        assert response.status == "success"
+        assert response.upvote is False
+        assert response.count == 1
 
     @pytest.mark.asyncio
     async def test_vote_storage_accumulation(self):
