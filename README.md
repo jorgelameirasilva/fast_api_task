@@ -1,68 +1,158 @@
-This is a task for Ascendion interview process. 
+# Chat Application
 
-Task: 
-Please create a simple application with a Python back end. The back end should offer a RESTful API endpoint which in turn communicates with a database of your choice to persists some data received in the RESTful call. We would like to see automated tests, input sanitisation. Consider error handling and observability. Create a local Git repository for this project. We do not expect perfection but would like to see confidence and good practices.
+A FastAPI-based chat application converted from Quart, designed to handle chat interactions, document serving, and user feedback.
 
+## Features
 
-
-### Setup
-
-1. Clone the repository:
-
-2. Set up a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate 
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Start the PostgreSQL database (using Docker):
-```bash
-docker-compose up -d db
-```
-
-5. Run database migrations:
-```bash
-alembic upgrade head
-```
-
-6. Start the application:
-```bash
-uvicorn app.main:app --reload
-```
-
-Or alternatively use Docker compose 
-```bash
-docker-compose up -d
-```
-
-7. Access the API documentation:
-   - Swagger UI: http://localhost:8000/docs
-   - ReDoc: http://localhost:8000/redoc
+- **Chat Interface**: Handle chat requests with message history and session state
+- **Ask Endpoint**: Process user queries and return responses
+- **Document Serving**: Serve static assets and content files
+- **Vote/Feedback System**: Collect user feedback on responses
+- **Authentication Setup**: Configurable authentication system
+- **Static File Serving**: Serve static assets and content files
 
 ## API Endpoints
 
-- `GET /api/tasks`: List all tasks
+### Core Endpoints
 
+- `GET /` - Main index page
+- `GET /redirect` - Redirect endpoint
+- `GET /favicon.ico` - Favicon serving
+- `GET /assets/{file_path:path}` - Static asset serving
+- `GET /content/{file_path:path}` - Content file serving
 
+### Chat Endpoints
+
+- `POST /ask` - Handle user queries
+- `POST /chat` - Handle chat conversations
+- `POST /vote` - Handle user feedback/voting
+
+### Configuration Endpoints
+
+- `GET /auth_setup` - Authentication configuration
+
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Create environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+4. Configure your environment variables in `.env`
+
+## Running the Application
+
+### Development
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Production
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Using Docker
+```bash
+docker-compose up
+```
+
+## Project Structure
+
+```
+app/
+├── main.py              # Main FastAPI application
+├── core/
+│   └── config.py        # Application configuration
+├── api/                 # API endpoints (legacy from task app)
+├── services/            # Business logic services
+├── db/                  # Database models and repositories
+├── exceptions/          # Custom exceptions
+└── schemas/             # Pydantic schemas
+
+static/                  # Static files (CSS, JS, images)
+├── assets/              # Static assets
+└── favicon.ico          # Favicon
+
+content/                 # Content files to be served
+logs/                    # Application logs
+tests/                   # Test files
+```
+
+## Configuration
+
+The application uses environment variables for configuration. Key settings include:
+
+- `DEBUG`: Enable debug mode
+- `ENVIRONMENT`: Application environment (development/production)
+- `AZURE_OPENAI_*`: Azure OpenAI configuration
+- `AZURE_SEARCH_*`: Azure Search configuration
+- `AZURE_STORAGE_*`: Azure Storage configuration
+- `AUTH_ENABLED`: Enable authentication
+
+## API Documentation
+
+Once the application is running, you can access:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+## Request/Response Models
+
+### ChatRequest
+```json
+{
+  "messages": [],
+  "context": {},
+  "session_state": "string"
+}
+```
+
+### AskRequest
+```json
+{
+  "user_query": "string",
+  "user_query_vector": [],
+  "chatbot_response": "string",
+  "count": 0,
+  "upvote": true
+}
+```
+
+### VoteRequest
+```json
+{
+  "user_query": "string",
+  "chatbot_response": "string",
+  "count": 0,
+  "upvote": true
+}
+```
+
+## Development
+
+This application is currently set up with placeholder implementations for all endpoints. To implement the full functionality, you'll need to:
+
+1. Integrate with Azure OpenAI for chat responses
+2. Implement Azure Search for document retrieval
+3. Set up Azure Blob Storage for content serving
+4. Implement authentication if required
+5. Add proper error handling and validation
+6. Implement logging and monitoring
 
 ## Testing
 
-Run the tests with:
+Run tests with:
 ```bash
 pytest
 ```
 
-## Adding db migrations
-```bash
-alembic revision --autogenerate -m "My new migration"
-```
+## License
 
-
-1 - alembic init alembic
-2 - alembic revision --autogenerate -m "create init tables"
-3 - alembic upgrade head
+[Add your license information here]

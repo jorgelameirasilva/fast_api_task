@@ -7,6 +7,7 @@ from app.api.endpoints import router as api_router
 from app.core.config import settings
 from app.exceptions.base import CustomException
 
+# Configure logging
 logger.add(
     "logs/app.log",
     rotation="500 MB",
@@ -17,12 +18,13 @@ logger.add(
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Task Management API",
-    version="0.1.0",
+    description="Chat Application API converted from Quart",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -32,21 +34,28 @@ app.add_middleware(
 )
 
 
+# Exception handlers
 @app.exception_handler(CustomException)
 async def custom_exception_handler(request: Request, exc: CustomException):
+    """Handle custom exceptions"""
+    logger.error(f"Custom exception: {exc.message}")
     return JSONResponse(
         status_code=exc.code,
-        content={"message": exc.message},
+        content={"message": exc.message, "details": exc.details},
     )
 
 
-app.include_router(api_router, prefix="/api")
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle general exceptions"""
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500, content={"error": "Internal server error", "detail": str(exc)}
+    )
 
 
-@app.get("/", tags=["Health"])
-async def health_check():
-    return {"status": "healthy"}
-
+# Include API routes
+app.include_router(api_router)
 
 if __name__ == "__main__":
     import uvicorn

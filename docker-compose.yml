@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  api:
+  chat-app:
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -9,23 +9,12 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-    depends_on:
-      - db
+      - ./static:/app/static
+      - ./content:/app/content
+      - ./logs:/app/logs
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/taskdb
       - DEBUG=1
       - ENVIRONMENT=development
-
-  db:
-    image: postgres:latest
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=taskdb
-    ports:
-      - "5432:5432"
-
-volumes:
-  postgres_data: 
+    env_file:
+      - .env
+    restart: unless-stopped 
