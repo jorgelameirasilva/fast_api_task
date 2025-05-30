@@ -5,6 +5,7 @@ from loguru import logger
 
 from app.api.endpoints import router as api_router
 from app.core.config import settings
+from app.core.setup import setup_clients, cleanup_clients
 from app.exceptions.base import CustomException
 
 # Configure logging
@@ -32,6 +33,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize clients and services on startup"""
+    logger.info("Application startup initiated")
+    try:
+        await setup_clients()
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to setup clients during startup: {e}")
+        # Don't raise the exception to allow the app to start with mock clients
+        logger.warning("Application started with fallback/mock clients")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup clients and resources on shutdown"""
+    logger.info("Application shutdown initiated")
+    try:
+        await cleanup_clients()
+        logger.info("Application shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during application shutdown: {e}")
 
 
 # Exception handlers

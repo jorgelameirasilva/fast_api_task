@@ -24,8 +24,32 @@ class RetrieveThenReadApproach(BaseApproach):
     where the query is self-contained and doesn't heavily depend on conversation context.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        search_client=None,
+        openai_client=None,
+        chatgpt_model: str = "gpt-4o",
+        chatgpt_deployment: str = "",
+        embedding_model: str = "text-embedding-ada-002",
+        embedding_deployment: str = "",
+        sourcepage_field: str = "sourcepage",
+        content_field: str = "content",
+        query_language: str = "en-us",
+        query_speller: str = "lexicon",
+    ):
         super().__init__("RetrieveThenRead")
+
+        # Store injected clients and configuration
+        self.search_client = search_client
+        self.openai_client = openai_client
+        self.chatgpt_model = chatgpt_model
+        self.chatgpt_deployment = chatgpt_deployment
+        self.embedding_model = embedding_model
+        self.embedding_deployment = embedding_deployment
+        self.sourcepage_field = sourcepage_field
+        self.content_field = content_field
+        self.query_language = query_language
+        self.query_speller = query_speller
 
     async def run(
         self,
