@@ -14,52 +14,77 @@ from app.schemas.chat import (
 )
 from app.core.config import settings
 from app.approaches import get_best_approach, get_approach, list_available_approaches
+from app.services.session_service import SessionService
+from app.services.response_generator import ResponseGenerator
 
 
 class ChatService:
-    """Service for handling chat operations"""
+    """Service focused solely on chat operations"""
 
-    def __init__(self):
+    def __init__(
+        self,
+        session_service: SessionService = None,
+        response_generator: ResponseGenerator = None,
+    ):
+        self.session_service = session_service or SessionService()
+        self.response_generator = response_generator or ResponseGenerator()
         self.session_storage: Dict[str, Any] = {}
         self.vote_storage: List[Dict[str, Any]] = []
 
     async def process_chat(
         self, request: ChatRequest, approach_name: str = None, stream: bool = False
     ) -> ChatResponse:
-        """
-        Process a chat request using the approaches system
-        """
+        """Process a chat request using the approaches system"""
         logger.info(f"Processing chat with {len(request.messages)} messages")
 
-        # Validate we have user messages
+        # Validate request
         user_messages = [msg for msg in request.messages if msg.role == "user"]
         if not user_messages:
             raise ValueError("No user message found in chat request")
 
-        # Convert ChatMessage objects to dict format for approaches
-        messages = []
-        for msg in request.messages:
-            messages.append({"role": msg.role, "content": msg.content})
+        # Convert messages and get approach
+        messages = self._convert_messages(request.messages)
+        approach = self._get_approach(request, approach_name, user_messages[-1])
 
-        # Get the last user message for approach selection
-        last_user_message = user_messages[-1]
+        # Prepare context and execute
+        context = self._prepare_context(request, messages)
 
-        # Determine the best approach or use specified one
+        try:
+            result = await self._execute_approach(
+                approach, messages, stream, request.session_state, context
+            )
+            return await self._build_response(result, request, approach, stream)
+        except Exception as e:
+            logger.error(f"Error executing approach {approach.name} for chat: {e}")
+            return await self._build_fallback_response(request)
+
+    def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, str]]:
+        """Convert ChatMessage objects to dict format"""
+        return [{"role": msg.role, "content": msg.content} for msg in messages]
+
+    def _get_approach(
+        self, request: ChatRequest, approach_name: str, last_user_message: ChatMessage
+    ):
+        """Get the appropriate approach for the request"""
         if approach_name:
             logger.info(f"Using explicit approach for chat: {approach_name}")
-            approach = get_approach(approach_name)
-        else:
-            approach = get_best_approach(
-                query=last_user_message.content,
-                context={"request": request},
-                message_count=len(messages),
-            )
-            logger.info(f"Selected approach for chat: {approach.name}")
+            return get_approach(approach_name)
 
-        # Prepare context for the approach
-        approach_context = {
+        approach = get_best_approach(
+            query=last_user_message.content,
+            context={"request": request},
+            message_count=len(request.messages),
+        )
+        logger.info(f"Selected approach for chat: {approach.name}")
+        return approach
+
+    def _prepare_context(
+        self, request: ChatRequest, messages: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        """Prepare context for approach execution"""
+        return {
             "overrides": request.context or {},
-            "auth_claims": None,  # Can be populated from authentication
+            "auth_claims": None,
             "request_metadata": {
                 "session_state": request.session_state,
                 "message_count": len(messages),
@@ -67,80 +92,65 @@ class ChatService:
             },
         }
 
-        # Execute the approach
-        try:
-            result = await approach.run(
-                messages=messages,
-                stream=stream,
-                session_state=request.session_state,
-                context=approach_context,
-            )
-
-            # Handle streaming vs non-streaming responses
-            if stream and hasattr(result, "__aiter__"):
-                # For streaming, collect final result
-                final_result = {}
-                async for chunk in result:
-                    final_result.update(chunk)
-                result = final_result
-
-            # Extract response components
-            response_content = result.get("content", "No response generated")
-            sources = result.get("sources", [])
-            response_context = result.get("context", {})
-
-            # Create response message
-            response_message = ChatMessage(
-                role="assistant", content=response_content, timestamp=datetime.now()
-            )
-
-            # Update session state if provided
-            session_state = request.session_state
-            if session_state:
-                self.session_storage[session_state] = {
-                    "last_interaction": datetime.now(),
-                    "message_count": len(request.messages) + 1,
-                    "approach_used": approach.name,
-                }
-
-            # Enhance context with chat-specific information
-            enhanced_context = {
-                **(request.context or {}),
-                **response_context,
-                "approach_used": approach.name,
-                "streaming": stream,
-                "sources_count": len(sources),
-                "session_updated": session_state is not None,
-                "chat_processed_at": datetime.now().isoformat(),
-            }
-
-            return ChatResponse(
-                message=response_message,
-                session_state=session_state,
-                context=enhanced_context,
-            )
-
-        except Exception as e:
-            logger.error(f"Error executing approach {approach.name} for chat: {e}")
-            # Fallback to simple response
-            return await self._fallback_chat_response(request)
-
-    async def _fallback_chat_response(self, request: ChatRequest) -> ChatResponse:
-        """
-        Fallback response when approach execution fails for chat
-        """
-        logger.warning("Using fallback response for chat request")
-
-        # Get the last user message for context
-        user_messages = [msg for msg in request.messages if msg.role == "user"]
-        last_user_message = user_messages[-1] if user_messages else None
-        user_content = (
-            last_user_message.content if last_user_message else "your message"
+    async def _execute_approach(
+        self, approach, messages, stream, session_state, context
+    ):
+        """Execute the approach and handle streaming"""
+        result = await approach.run(
+            messages=messages,
+            stream=stream,
+            session_state=session_state,
+            context=context,
         )
 
+        if stream and hasattr(result, "__aiter__"):
+            final_result = {}
+            async for chunk in result:
+                final_result.update(chunk)
+            return final_result
+
+        return result
+
+    async def _build_response(
+        self, result: Dict[str, Any], request: ChatRequest, approach, stream: bool
+    ) -> ChatResponse:
+        """Build the chat response from approach result"""
+        response_content = result.get("content", "No response generated")
+        response_context = result.get("context", {})
+
+        response_message = ChatMessage(
+            role="assistant", content=response_content, timestamp=datetime.now()
+        )
+
+        # Update session if needed
+        if request.session_state:
+            await self.session_service.update_session(
+                request.session_state, len(request.messages) + 1, approach.name
+            )
+
+        enhanced_context = {
+            **(request.context or {}),
+            **response_context,
+            "approach_used": approach.name,
+            "streaming": stream,
+            "sources_count": len(result.get("sources", [])),
+            "session_updated": request.session_state is not None,
+            "chat_processed_at": datetime.now().isoformat(),
+        }
+
+        return ChatResponse(
+            message=response_message,
+            session_state=request.session_state,
+            context=enhanced_context,
+        )
+
+    async def _build_fallback_response(self, request: ChatRequest) -> ChatResponse:
+        """Build fallback response when approach execution fails"""
+        logger.warning("Using fallback response for chat request")
+
         fallback_content = (
-            f"I apologize, but I encountered an issue while processing your message. "
-            f"Please try rephrasing your question or contact support for assistance."
+            "I apologize, but I encountered an issue while processing your message. "
+            "Please try rephrasing your question or contact support for assistance."
         )
 
         response_message = ChatMessage(
@@ -433,5 +443,5 @@ class ChatService:
         ]
 
 
-# Create a singleton instance
+# Create singleton instance
 chat_service = ChatService()
