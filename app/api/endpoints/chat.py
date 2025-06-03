@@ -27,13 +27,25 @@ async def chat(
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
-    Handle chat conversations
+    Handle chat conversations using approaches
     """
     logger.info("Chat endpoint called")
 
     try:
+        # Ensure we have valid messages
+        if not request.messages:
+            raise ValueError("Request must contain messages")
+
+        # Process using the approach system
         response = await chat_service.process_chat(request=request, stream=stream)
+
+        # Log successful processing
+        logger.info(
+            f"Chat processed successfully using approach: {response.context.get('approach_used', 'unknown')}"
+        )
+
         return response
+
     except ValueError as e:
         logger.error(f"Chat validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -48,13 +60,25 @@ async def ask(
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
-    Handle user queries and return responses
+    Handle user queries using approaches
     """
     logger.info(f"Ask endpoint called with query: {request.user_query[:50]}...")
 
     try:
+        # Validate request
+        if not request.user_query or not request.user_query.strip():
+            raise ValueError("User query cannot be empty")
+
+        # Process using the approach system
         response = await ask_service.process_ask(request, stream=stream)
+
+        # Log successful processing
+        logger.info(
+            f"Ask processed successfully using approach: {response.context.get('approach_used', 'unknown')}"
+        )
+
         return response
+
     except ValueError as e:
         logger.error(f"Ask validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))

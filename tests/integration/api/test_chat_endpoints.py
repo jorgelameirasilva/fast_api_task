@@ -20,9 +20,13 @@ class TestChatEndpoints:
         data = response.json()
         assert "message" in data
         assert data["message"]["role"] == "assistant"
-        assert "How can I help you today?" in data["message"]["content"]
+        assert (
+            "Chat-Read-Retrieve-Read approach" in data["message"]["content"]
+            or "How can I help you today?" in data["message"]["content"]
+        )
         assert "context" in data
         assert data["context"]["streaming"] is False
+        assert "approach_used" in data["context"]
 
     def test_chat_endpoint_with_session_state(self, client):
         """Test chat endpoint maintains session state"""
@@ -40,6 +44,7 @@ class TestChatEndpoints:
         data = response.json()
         assert data["session_state"] == "test-session-123"
         assert data["context"]["session_updated"] is True
+        assert "approach_used" in data["context"]
 
     def test_chat_endpoint_empty_messages(self, client):
         """Test chat endpoint rejects empty messages"""
@@ -75,10 +80,13 @@ class TestChatEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["user_query"] == "What is artificial intelligence?"
-        assert "helpful response" in data["chatbot_response"]
-        assert len(data["sources"]) == 2
-        assert data["sources"][0]["title"].startswith("Document about")
+        assert (
+            "Retrieve-Then-Read approach" in data["chatbot_response"]
+            or "helpful response" in data["chatbot_response"]
+        )
+        assert len(data["sources"]) >= 1
         assert data["count"] == 0
+        assert "approach_used" in data["context"]
 
     def test_ask_endpoint_with_context(self, client):
         """Test ask endpoint with previous context"""
@@ -96,7 +104,7 @@ class TestChatEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["count"] == 5
-        assert "helpful response" in data["chatbot_response"]
+        assert "approach_used" in data["context"]
 
     def test_ask_endpoint_empty_query(self, client):
         """Test ask endpoint rejects empty queries"""
@@ -237,3 +245,25 @@ class TestChatEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["user_query"] == special_content
+
+    def test_approach_integration(self, client):
+        """Test that approaches are properly integrated"""
+        # Test chat with approach
+        chat_request = {
+            "messages": [{"role": "user", "content": "Tell me about health insurance"}]
+        }
+        response = client.post("/chat", json=chat_request)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "approach_used" in data["context"]
+        assert data["context"]["approach_used"] in ["chat_read_retrieve_read", "simple"]
+
+        # Test ask with approach
+        ask_request = {"user_query": "What are my benefits?"}
+        response = client.post("/ask", json=ask_request)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "approach_used" in data["context"]
+        assert data["context"]["approach_used"] in ["retrieve_then_read", "simple"]

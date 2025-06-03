@@ -17,6 +17,8 @@ CONFIG_SEARCH_CLIENT = "search_client"
 CONFIG_OPENAI_CLIENT = "openai_client"
 CONFIG_BLOB_CONTAINER_CLIENT = "blob_container_client"
 CONFIG_AUTH_CLIENT = "auth_client"
+CONFIG_ASK_APPROACH = "ask_approach"
+CONFIG_CHAT_APPROACH = "chat_approach"
 
 # Global clients
 _search_client = None
@@ -26,13 +28,13 @@ _auth_helper = None
 
 
 async def setup_clients():
-    """Setup application clients"""
+    """Setup application clients and approaches"""
     global _search_client, _openai_client, _blob_container_client, _auth_helper
 
     logger.info("Starting client setup...")
 
     try:
-        # Setup clients
+        # Setup clients first
         _search_client = await _setup_search_client()
         _blob_container_client = await _setup_blob_client()
         _openai_client = await _setup_openai_client()
@@ -44,10 +46,10 @@ async def setup_clients():
         current_app_config[CONFIG_BLOB_CONTAINER_CLIENT] = _blob_container_client
         current_app_config[CONFIG_AUTH_CLIENT] = _auth_helper
 
-        logger.info("Client setup completed successfully")
+        logger.info("Basic client setup completed successfully")
 
     except Exception as e:
-        logger.error(f"Error during client setup: {e}")
+        logger.error(f"Error during basic client setup: {e}")
         # Use mock clients as fallback
         _search_client = MockSearchClient()
         _openai_client = MockOpenAIClient()
@@ -59,6 +61,23 @@ async def setup_clients():
         current_app_config[CONFIG_AUTH_CLIENT] = None
 
         logger.warning("Using mock clients due to setup errors")
+
+    # Always setup approaches (critical for API functionality)
+    try:
+        approach_setup_success = await _setup_approaches()
+        if approach_setup_success:
+            logger.info("Approach setup completed successfully")
+        else:
+            logger.warning("Approach setup completed with fallbacks")
+
+    except Exception as e:
+        logger.critical(f"CRITICAL: Failed to setup approaches: {e}")
+        # This should cause startup to fail if approaches cannot be initialized
+        raise RuntimeError(
+            f"Could not initialize approaches - system cannot start: {e}"
+        )
+
+    logger.info("Client and approach setup completed")
 
 
 async def _setup_search_client():
@@ -202,6 +221,100 @@ async def _setup_auth_helper():
         return None
 
 
+async def _setup_approaches():
+    """Setup approach configurations - ensure approaches are always available"""
+    try:
+        from app.approaches import (
+            RetrieveThenReadApproach,
+            ChatReadRetrieveReadApproach,
+        )
+        from app.approaches.approach_registry import register_approach_instance
+
+        # Always setup approaches with the best available clients
+        # This ensures approaches work even with mock clients for development
+        logger.info("Setting up approach configurations...")
+
+        # Setup RetrieveThenRead approach (for /ask endpoint)
+        ask_approach = RetrieveThenReadApproach(
+            search_client=_search_client,
+            openai_client=_openai_client,
+            chatgpt_model=settings.OPENAI_CHATGPT_MODEL,
+            chatgpt_deployment=settings.AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+            embedding_model=settings.OPENAI_EMB_MODEL,
+            embedding_deployment=settings.AZURE_OPENAI_EMB_DEPLOYMENT,
+            sourcepage_field=settings.KB_FIELDS_SOURCEPAGE,
+            content_field=settings.KB_FIELDS_CONTENT,
+            query_language=settings.AZURE_SEARCH_QUERY_LANGUAGE,
+            query_speller=settings.AZURE_SEARCH_QUERY_SPELLER,
+        )
+
+        # Setup ChatReadRetrieveRead approach (for /chat endpoint)
+        chat_approach = ChatReadRetrieveReadApproach(
+            search_client=_search_client,
+            openai_client=_openai_client,
+            chatgpt_model=settings.OPENAI_CHATGPT_MODEL,
+            chatgpt_deployment=settings.AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+            embedding_model=settings.OPENAI_EMB_MODEL,
+            embedding_deployment=settings.AZURE_OPENAI_EMB_DEPLOYMENT,
+            sourcepage_field=settings.KB_FIELDS_SOURCEPAGE,
+            content_field=settings.KB_FIELDS_CONTENT,
+            query_language=settings.AZURE_SEARCH_QUERY_LANGUAGE,
+            query_speller=settings.AZURE_SEARCH_QUERY_SPELLER,
+        )
+
+        # Register approaches with the global registry
+        register_approach_instance("retrieve_then_read", ask_approach)
+        register_approach_instance("chat_read_retrieve_read", chat_approach)
+
+        # Store approaches in global config (matching old code structure)
+        current_app_config[CONFIG_ASK_APPROACH] = ask_approach
+        current_app_config[CONFIG_CHAT_APPROACH] = chat_approach
+
+        # Log successful setup
+        logger.info(f"Ask approach configured: {ask_approach.__class__.__name__}")
+        logger.info(f"Chat approach configured: {chat_approach.__class__.__name__}")
+        logger.info(
+            "Approach configurations completed and registered with dependency injection"
+        )
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to setup approaches: {e}")
+        # This is critical - approaches should always be available
+        logger.error(
+            "CRITICAL: Approach setup failed - API will not function correctly"
+        )
+
+        # Try to create minimal approaches as last resort
+        try:
+            logger.warning("Attempting to create minimal fallback approaches...")
+
+            from app.approaches import (
+                RetrieveThenReadApproach,
+                ChatReadRetrieveReadApproach,
+            )
+
+            # Create minimal approaches without clients
+            minimal_ask_approach = RetrieveThenReadApproach()
+            minimal_chat_approach = ChatReadRetrieveReadApproach()
+
+            current_app_config[CONFIG_ASK_APPROACH] = minimal_ask_approach
+            current_app_config[CONFIG_CHAT_APPROACH] = minimal_chat_approach
+
+            logger.warning("Minimal fallback approaches created")
+            return False
+
+        except Exception as fallback_error:
+            logger.critical(
+                f"Failed to create even minimal approaches: {fallback_error}"
+            )
+            # This should never happen in normal operation
+            raise RuntimeError(
+                "Could not initialize any approaches - system cannot start"
+            )
+
+
 # Dependency injection functions
 @lru_cache()
 def get_search_client():
@@ -225,6 +338,18 @@ def get_blob_client():
 def get_auth_helper():
     """Get the configured authentication helper"""
     return current_app_config.get(CONFIG_AUTH_CLIENT)
+
+
+@lru_cache()
+def get_ask_approach():
+    """Get the configured ask approach"""
+    return current_app_config.get(CONFIG_ASK_APPROACH)
+
+
+@lru_cache()
+def get_chat_approach():
+    """Get the configured chat approach"""
+    return current_app_config.get(CONFIG_CHAT_APPROACH)
 
 
 def get_app_config(key: str, default=None):
