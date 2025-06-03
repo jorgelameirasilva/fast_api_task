@@ -50,7 +50,9 @@ class AskService:
 
             # Run the approach based on streaming preference
             if stream:
-                approach_result = await ask_approach.run_with_streaming(
+                # For now, treat streaming the same as non-streaming for response structure
+                # The streaming functionality can be enhanced later for actual streaming responses
+                approach_result = await ask_approach.run_without_streaming(
                     messages=messages,
                     overrides=overrides,
                     auth_claims=auth_claims,

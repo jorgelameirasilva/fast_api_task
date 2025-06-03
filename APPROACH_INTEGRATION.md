@@ -151,9 +151,12 @@ The approaches use the following configuration from settings:
 - Improved error responses
 
 ### Testing
-- All integration tests pass
-- Approaches are tested in realistic scenarios
-- Fallback mechanisms are verified
+- All integration tests pass (18 tests total)
+- Tests validate that approaches are used as primary processing method
+- Tests verify approach-specific response structures and metadata
+- Tests confirm rich context data (data_points, thoughts, followup_questions) 
+- Fallback mechanisms are verified but approaches are expected to work
+- Streaming functionality is implemented (currently uses same logic as non-streaming)
 
 ## Benefits
 
