@@ -4,68 +4,61 @@ This module follows FastAPI best practices for dependency injection.
 """
 
 import os
-from typing import Optional, Dict, Any
 from functools import lru_cache
 from loguru import logger
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(".")
-except ImportError:
-    logger.warning("python-dotenv not installed, skipping .env file loading")
-
 from app.core.config import settings
 
-# Global clients - initialized during startup
+# Global configuration storage
+current_app_config = {}
+
+# Configuration keys
+CONFIG_SEARCH_CLIENT = "search_client"
+CONFIG_OPENAI_CLIENT = "openai_client"
+CONFIG_BLOB_CONTAINER_CLIENT = "blob_container_client"
+CONFIG_AUTH_CLIENT = "auth_client"
+
+# Global clients
 _search_client = None
 _openai_client = None
 _blob_container_client = None
 _auth_helper = None
 
-# Configuration storage for approaches
-CONFIG_OPENAI_CLIENT = "openai_client"
-CONFIG_SEARCH_CLIENT = "search_client"
-CONFIG_BLOB_CONTAINER_CLIENT = "blob_container_client"
-CONFIG_AUTH_CLIENT = "auth_client"
-CONFIG_ASK_APPROACH = "ask_approach"
-CONFIG_CHAT_APPROACH = "chat_approach"
-
-# Global configuration dict
-current_app_config: Dict[str, Any] = {}
-
 
 async def setup_clients():
-    """
-    Initialize and configure all Azure services and OpenAI clients.
-    This function is called during FastAPI startup.
-    """
-    global _search_client, _openai_client, _blob_container_client, _auth_helper, current_app_config
+    """Setup application clients"""
+    global _search_client, _openai_client, _blob_container_client, _auth_helper
 
     logger.info("Starting client setup...")
 
-    # Setup Azure Search client
-    _search_client = await _setup_search_client()
+    try:
+        # Setup clients
+        _search_client = await _setup_search_client()
+        _blob_container_client = await _setup_blob_client()
+        _openai_client = await _setup_openai_client()
+        _auth_helper = await _setup_auth_helper()
 
-    # Setup Blob Storage client
-    _blob_container_client = await _setup_blob_client()
+        # Store in global config
+        current_app_config[CONFIG_SEARCH_CLIENT] = _search_client
+        current_app_config[CONFIG_OPENAI_CLIENT] = _openai_client
+        current_app_config[CONFIG_BLOB_CONTAINER_CLIENT] = _blob_container_client
+        current_app_config[CONFIG_AUTH_CLIENT] = _auth_helper
 
-    # Setup OpenAI client
-    _openai_client = await _setup_openai_client()
+        logger.info("Client setup completed successfully")
 
-    # Setup Authentication helper
-    _auth_helper = await _setup_auth_helper()
+    except Exception as e:
+        logger.error(f"Error during client setup: {e}")
+        # Use mock clients as fallback
+        _search_client = MockSearchClient()
+        _openai_client = MockOpenAIClient()
+        _blob_container_client = MockBlobClient()
 
-    # Store clients in global config
-    current_app_config[CONFIG_SEARCH_CLIENT] = _search_client
-    current_app_config[CONFIG_OPENAI_CLIENT] = _openai_client
-    current_app_config[CONFIG_BLOB_CONTAINER_CLIENT] = _blob_container_client
-    current_app_config[CONFIG_AUTH_CLIENT] = _auth_helper
+        current_app_config[CONFIG_SEARCH_CLIENT] = _search_client
+        current_app_config[CONFIG_OPENAI_CLIENT] = _openai_client
+        current_app_config[CONFIG_BLOB_CONTAINER_CLIENT] = _blob_container_client
+        current_app_config[CONFIG_AUTH_CLIENT] = None
 
-    # Setup approach configurations
-    await _setup_approaches()
-
-    logger.info("Client setup completed successfully")
+        logger.warning("Using mock clients due to setup errors")
 
 
 async def _setup_search_client():
@@ -74,19 +67,17 @@ async def _setup_search_client():
         from azure.search.documents import SearchClient
         from azure.core.credentials import AzureKeyCredential
 
-        if not settings.AZURE_SEARCH_SERVICE or not settings.SEARCH_API_KEY:
+        if not all([settings.AZURE_SEARCH_SERVICE, settings.SEARCH_API_KEY]):
             logger.warning("Azure Search configuration missing, using mock client")
             return MockSearchClient()
 
         search_client = SearchClient(
-            endpoint=settings.azure_search_endpoint,
+            endpoint=f"https://{settings.AZURE_SEARCH_SERVICE}.search.windows.net",
             index_name=settings.AZURE_SEARCH_INDEX,
             credential=AzureKeyCredential(settings.SEARCH_API_KEY),
         )
 
-        logger.info(
-            f"Azure Search client configured for service: {settings.AZURE_SEARCH_SERVICE}"
-        )
+        logger.info("Azure Search client configured")
         return search_client
 
     except ImportError:
@@ -102,27 +93,20 @@ async def _setup_blob_client():
     try:
         from azure.storage.blob import BlobServiceClient
 
-        if not settings.AZURE_STORAGE_ACCOUNT:
+        if not settings.STORAGE_CONNECTION_STRING:
             logger.warning("Azure Storage configuration missing, using mock client")
             return MockBlobClient()
 
-        if settings.STORAGE_CONNECTION_STRING:
-            blob_service_client = BlobServiceClient.from_connection_string(
-                settings.STORAGE_CONNECTION_STRING
-            )
-        else:
-            blob_service_client = BlobServiceClient(
-                account_url=settings.azure_storage_account_url,
-                # Add credential here if needed
-            )
-
-        blob_container_client = blob_service_client.get_container_client(
+        blob_client = BlobServiceClient(
+            account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
+            container_name="aisearch",
+            credentials=settings.STORAGE_CONNECTION_STRING,
+        )
+        blob_container_client = blob_client.get_container_client(
             settings.AZURE_STORAGE_CONTAINER
         )
 
-        logger.info(
-            f"Azure Blob Storage client configured for account: {settings.AZURE_STORAGE_ACCOUNT}"
-        )
+        logger.info("Azure Blob Storage client configured")
         return blob_container_client
 
     except ImportError:
@@ -134,46 +118,36 @@ async def _setup_blob_client():
 
 
 async def _setup_openai_client():
-    """Setup OpenAI client (Azure or OpenAI)"""
-    try:
-        if settings.OPENAI_HOST == "azure":
-            return await _setup_azure_openai_client()
-        else:
-            return await _setup_standard_openai_client()
-
-    except Exception as e:
-        logger.error(f"Failed to setup OpenAI client: {e}")
-        return MockOpenAIClient()
+    """Setup OpenAI client (Azure or Standard)"""
+    if settings.OPENAI_HOST == "azure":
+        return await _setup_azure_openai_client()
+    else:
+        return await _setup_standard_openai_client()
 
 
 async def _setup_azure_openai_client():
     """Setup Azure OpenAI client"""
     try:
         from openai import AsyncAzureOpenAI
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
-        if not settings.AZURE_OPENAI_SERVICE:
+        if not all([settings.AZURE_OPENAI_SERVICE, settings.OPENAI_API_KEY]):
             logger.warning("Azure OpenAI configuration missing, using mock client")
             return MockOpenAIClient()
 
-        # Use managed identity authentication
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
-        )
-
         openai_client = AsyncAzureOpenAI(
             api_version="2023-07-01-preview",
-            azure_endpoint=settings.azure_openai_endpoint,
-            azure_ad_token_provider=token_provider,
+            azure_endpoint=f"https://{settings.AZURE_OPENAI_SERVICE}.openai.azure.com",
+            api_key=settings.OPENAI_API_KEY,
         )
 
-        logger.info(
-            f"Azure OpenAI client configured for service: {settings.AZURE_OPENAI_SERVICE}"
-        )
+        logger.info("Azure OpenAI client configured")
         return openai_client
 
     except ImportError:
         logger.warning("Azure OpenAI SDK not installed, using mock client")
+        return MockOpenAIClient()
+    except Exception as e:
+        logger.error(f"Failed to setup Azure OpenAI client: {e}")
         return MockOpenAIClient()
 
 
@@ -201,12 +175,12 @@ async def _setup_standard_openai_client():
 
 async def _setup_auth_helper():
     """Setup authentication helper"""
+    if not settings.AZURE_USE_AUTHENTICATION:
+        logger.info("Authentication disabled")
+        return None
+
     try:
         from app.core.auth import AuthenticationHelper
-
-        if not settings.AZURE_USE_AUTHENTICATION:
-            logger.info("Authentication disabled")
-            return None
 
         auth_helper = AuthenticationHelper(
             use_authentication=settings.AZURE_USE_AUTHENTICATION,
@@ -226,60 +200,6 @@ async def _setup_auth_helper():
     except Exception as e:
         logger.error(f"Failed to setup authentication helper: {e}")
         return None
-
-
-async def _setup_approaches():
-    """Setup approach configurations"""
-    try:
-        from app.approaches import (
-            RetrieveThenReadApproach,
-            ChatReadRetrieveReadApproach,
-        )
-        from app.approaches.approach_registry import register_approach_instance
-
-        # Setup RetrieveThenRead approach
-        ask_approach = RetrieveThenReadApproach(
-            search_client=_search_client,
-            openai_client=_openai_client,
-            chatgpt_model=settings.OPENAI_CHATGPT_MODEL,
-            chatgpt_deployment=settings.AZURE_OPENAI_CHATGPT_DEPLOYMENT,
-            embedding_model=settings.OPENAI_EMB_MODEL,
-            embedding_deployment=settings.AZURE_OPENAI_EMB_DEPLOYMENT,
-            sourcepage_field=settings.KB_FIELDS_SOURCEPAGE,
-            content_field=settings.KB_FIELDS_CONTENT,
-            query_language=settings.AZURE_SEARCH_QUERY_LANGUAGE,
-            query_speller=settings.AZURE_SEARCH_QUERY_SPELLER,
-        )
-
-        # Setup ChatReadRetrieveRead approach
-        chat_approach = ChatReadRetrieveReadApproach(
-            search_client=_search_client,
-            openai_client=_openai_client,
-            chatgpt_model=settings.OPENAI_CHATGPT_MODEL,
-            chatgpt_deployment=settings.AZURE_OPENAI_CHATGPT_DEPLOYMENT,
-            embedding_model=settings.OPENAI_EMB_MODEL,
-            embedding_deployment=settings.AZURE_OPENAI_EMB_DEPLOYMENT,
-            sourcepage_field=settings.KB_FIELDS_SOURCEPAGE,
-            content_field=settings.KB_FIELDS_CONTENT,
-            query_language=settings.AZURE_SEARCH_QUERY_LANGUAGE,
-            query_speller=settings.AZURE_SEARCH_QUERY_SPELLER,
-        )
-
-        # Register approaches with the global registry (this replaces class-based instances)
-        register_approach_instance("retrieve_then_read", ask_approach)
-        register_approach_instance("chat_read_retrieve_read", chat_approach)
-
-        # Store approaches in global config for backward compatibility
-        current_app_config[CONFIG_ASK_APPROACH] = ask_approach
-        current_app_config[CONFIG_CHAT_APPROACH] = chat_approach
-
-        logger.info(
-            "Approach configurations completed and registered with dependency injection"
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to setup approaches: {e}")
-        logger.warning("Falling back to class-based approach instantiation")
 
 
 # Dependency injection functions

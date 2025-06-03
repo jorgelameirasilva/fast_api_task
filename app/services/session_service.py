@@ -10,15 +10,17 @@ class SessionService:
         self.session_storage: Dict[str, Any] = {}
 
     async def update_session(
-        self, session_id: str, message_count: int, approach_used: str
+        self, session_id: str, message_count: int, interaction_type: str = "chat"
     ) -> None:
         """Update session with interaction details"""
-        logger.debug(f"Updating session {session_id} with approach {approach_used}")
+        logger.debug(
+            f"Updating session {session_id} with interaction type {interaction_type}"
+        )
 
         self.session_storage[session_id] = {
             "last_interaction": datetime.now(),
             "message_count": message_count,
-            "approach_used": approach_used,
+            "interaction_type": interaction_type,
         }
 
     async def get_session(self, session_id: str) -> Dict[str, Any]:

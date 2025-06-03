@@ -11,7 +11,12 @@ from app.schemas.chat import (
     VoteResponse,
     AuthSetupResponse,
 )
+
+# Import the correct services
 from app.services.chat_service import chat_service
+from app.services.ask_service import ask_service
+from app.services.vote_service import vote_service
+from app.services.auth_service import auth_service
 
 router = APIRouter()
 
@@ -19,23 +24,15 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def chat(
     request: ChatRequest,
-    approach: Optional[str] = Query(
-        None,
-        description="Specific approach to use (e.g., 'retrieve_then_read', 'chat_read_retrieve_read')",
-    ),
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
-    Handle chat conversations using the approaches system
+    Handle chat conversations
     """
     logger.info("Chat endpoint called")
-    if approach:
-        logger.info(f"Using explicit approach for chat: {approach}")
 
     try:
-        response = await chat_service.process_chat(
-            request=request, approach_name=approach, stream=stream
-        )
+        response = await chat_service.process_chat(request=request, stream=stream)
         return response
     except ValueError as e:
         logger.error(f"Chat validation error: {e}")
@@ -48,29 +45,15 @@ async def chat(
 @router.post("/ask", response_model=AskResponse, status_code=status.HTTP_200_OK)
 async def ask(
     request: AskRequest,
-    approach: Optional[str] = Query(
-        None,
-        description="Specific approach to use (e.g., 'retrieve_then_read', 'chat_read_retrieve_read')",
-    ),
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
-    Handle user queries and return responses using the approaches system
+    Handle user queries and return responses
     """
     logger.info(f"Ask endpoint called with query: {request.user_query[:50]}...")
-    if approach:
-        logger.info(f"Using explicit approach: {approach}")
 
     try:
-        if approach:
-            # Use specific approach if requested
-            response = await chat_service.process_ask_with_approach(
-                request=request, approach_name=approach, stream=stream
-            )
-        else:
-            # Use automatic approach selection with streaming support
-            response = await chat_service.process_ask(request, stream=stream)
-
+        response = await ask_service.process_ask(request, stream=stream)
         return response
     except ValueError as e:
         logger.error(f"Ask validation error: {e}")
@@ -87,7 +70,7 @@ async def vote(request: VoteRequest):
     """
     logger.info(f"Vote endpoint called: upvote={request.upvote}")
     try:
-        response = await chat_service.process_vote(request)
+        response = await vote_service.process_vote(request)
         return response
     except ValueError as e:
         logger.error(f"Vote validation error: {e}")
@@ -106,7 +89,7 @@ async def auth_setup():
     """
     logger.info("Auth setup endpoint called")
     try:
-        response = await chat_service.get_auth_setup()
+        response = await auth_service.get_auth_setup()
         return response
     except Exception as e:
         logger.error(f"Auth setup error: {e}")

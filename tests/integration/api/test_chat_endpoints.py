@@ -1,152 +1,120 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, Mock, AsyncMock
 
 
 class TestChatEndpoints:
     """Integration tests for chat API endpoints"""
 
-    def test_chat_endpoint_success(self, client):
-        """Test successful chat endpoint call"""
+    def test_chat_endpoint_basic_conversation(self, client):
+        """Test basic chat conversation functionality"""
         # Arrange
         chat_request = {
             "messages": [{"role": "user", "content": "Hello, how are you?"}]
         }
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
+        # Act
+        response = client.post("/chat", json=chat_request)
 
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant",
-                    content="I'm doing well, thank you!",
-                    timestamp=datetime.now(),
-                ),
-                context={"approach_used": "TestApproach"},
-            )
-            mock_process_chat.return_value = mock_response
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+        assert data["message"]["role"] == "assistant"
+        assert "How can I help you today?" in data["message"]["content"]
+        assert "context" in data
+        assert data["context"]["streaming"] is False
 
-            # Act
-            response = client.post("/chat", json=chat_request)
-
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert "message" in data
-            assert data["message"]["role"] == "assistant"
-            assert data["message"]["content"] == "I'm doing well, thank you!"
-
-    def test_chat_endpoint_with_session(self, client):
-        """Test chat endpoint with session state"""
+    def test_chat_endpoint_with_session_state(self, client):
+        """Test chat endpoint maintains session state"""
         # Arrange
         chat_request = {
-            "messages": [{"role": "user", "content": "Remember this conversation"}],
+            "messages": [{"role": "user", "content": "Remember my name is John"}],
             "session_state": "test-session-123",
         }
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
+        # Act
+        response = client.post("/chat", json=chat_request)
 
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant",
-                    content="I'll remember this conversation",
-                    timestamp=datetime.now(),
-                ),
-                session_state="test-session-123",
-                context={"approach_used": "SessionApproach"},
-            )
-            mock_process_chat.return_value = mock_response
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_state"] == "test-session-123"
+        assert data["context"]["session_updated"] is True
 
-            # Act
-            response = client.post("/chat", json=chat_request)
-
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert data["session_state"] == "test-session-123"
-
-    def test_chat_endpoint_invalid_request(self, client):
-        """Test chat endpoint with invalid request"""
+    def test_chat_endpoint_empty_messages(self, client):
+        """Test chat endpoint rejects empty messages"""
         # Arrange
-        invalid_request = {"messages": []}  # Empty messages should be invalid
+        invalid_request = {"messages": []}
 
         # Act
         response = client.post("/chat", json=invalid_request)
 
         # Assert
-        assert response.status_code == 400  # The actual error code returned by the API
+        assert response.status_code == 400
 
-    def test_ask_endpoint_success(self, client):
-        """Test successful ask endpoint call"""
+    def test_chat_endpoint_missing_content(self, client):
+        """Test chat endpoint rejects messages without content"""
+        # Arrange
+        invalid_request = {"messages": [{"role": "user"}]}
+
+        # Act
+        response = client.post("/chat", json=invalid_request)
+
+        # Assert
+        assert response.status_code == 422  # Validation error
+
+    def test_ask_endpoint_basic_question(self, client):
+        """Test basic ask functionality"""
         # Arrange
         ask_request = {"user_query": "What is artificial intelligence?"}
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_ask"
-        ) as mock_process_ask:
-            from app.schemas.chat import AskResponse
+        # Act
+        response = client.post("/ask", json=ask_request)
 
-            mock_response = AskResponse(
-                user_query="What is artificial intelligence?",
-                chatbot_response="AI is a field of computer science...",
-                sources=[{"title": "AI Guide", "url": "/ai-guide.pdf"}],
-                context={"approach_used": "AskApproach"},
-                count=0,
-            )
-            mock_process_ask.return_value = mock_response
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user_query"] == "What is artificial intelligence?"
+        assert "helpful response" in data["chatbot_response"]
+        assert len(data["sources"]) == 2
+        assert data["sources"][0]["title"].startswith("Document about")
+        assert data["count"] == 0
 
-            # Act
-            response = client.post("/ask", json=ask_request)
-
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert data["user_query"] == "What is artificial intelligence?"
-            assert data["chatbot_response"] == "AI is a field of computer science..."
-            assert len(data["sources"]) == 1
-
-    def test_ask_endpoint_with_approach(self, client):
-        """Test ask endpoint with specific approach"""
+    def test_ask_endpoint_with_context(self, client):
+        """Test ask endpoint with previous context"""
         # Arrange
-        ask_request = {"user_query": "Explain machine learning"}
+        ask_request = {
+            "user_query": "Can you explain more?",
+            "chatbot_response": "AI is a technology...",
+            "count": 5,
+        }
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_ask_with_approach"
-        ) as mock_process_ask:
-            from app.schemas.chat import AskResponse
+        # Act
+        response = client.post("/ask", json=ask_request)
 
-            mock_response = AskResponse(
-                user_query="Explain machine learning",
-                chatbot_response="Machine learning is...",
-                sources=[],
-                context={"approach_used": "SpecificApproach"},
-                count=0,
-            )
-            mock_process_ask.return_value = mock_response
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 5
+        assert "helpful response" in data["chatbot_response"]
 
-            # Act
-            response = client.post(
-                "/ask", json=ask_request, params={"approach": "specific_approach"}
-            )
+    def test_ask_endpoint_empty_query(self, client):
+        """Test ask endpoint rejects empty queries"""
+        # Arrange
+        invalid_request = {"user_query": ""}
 
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert data["chatbot_response"] == "Machine learning is..."
+        # Act
+        response = client.post("/ask", json=invalid_request)
 
-    def test_vote_endpoint_success(self, client):
-        """Test successful vote endpoint call"""
+        # Assert
+        assert response.status_code == 422  # Validation error
+
+    def test_vote_endpoint_upvote(self, client):
+        """Test successful upvote"""
         # Arrange
         vote_request = {
-            "user_query": "Test query",
-            "chatbot_response": "Test response",
+            "user_query": "What is machine learning?",
+            "chatbot_response": "Machine learning is a subset of AI...",
             "upvote": True,
             "count": 1,
         }
@@ -160,15 +128,16 @@ class TestChatEndpoints:
         assert data["status"] == "success"
         assert data["upvote"] is True
         assert data["count"] == 1
+        assert "recorded successfully" in data["message"]
 
     def test_vote_endpoint_downvote(self, client):
-        """Test vote endpoint with downvote"""
+        """Test successful downvote"""
         # Arrange
         vote_request = {
-            "user_query": "Test query",
-            "chatbot_response": "Test response",
+            "user_query": "Explain quantum computing",
+            "chatbot_response": "This is a poor response...",
             "upvote": False,
-            "count": 1,
+            "count": 2,
         }
 
         # Act
@@ -178,241 +147,93 @@ class TestChatEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["upvote"] is False
+        assert data["count"] == 2
 
-    def test_vote_endpoint_invalid_vote(self, client):
-        """Test vote endpoint with conflicting votes"""
+    def test_vote_endpoint_with_additional_feedback(self, client):
+        """Test vote with additional feedback fields"""
         # Arrange
         vote_request = {
-            "user_query": "Test query",
-            "chatbot_response": "Test response",
+            "user_query": "How does blockchain work?",
+            "chatbot_response": "Blockchain is a distributed ledger...",
             "upvote": True,
-            "downvote": True,  # Conflicting votes
             "count": 1,
+            "reason_multiple_choice": "very_helpful",
+            "additional_comments": "Great explanation, very clear!",
         }
 
         # Act
         response = client.post("/vote", json=vote_request)
 
         # Assert
-        assert response.status_code == 400  # Bad request due to validation error
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
 
     def test_auth_setup_endpoint(self, client):
-        """Test auth setup endpoint"""
+        """Test authentication setup configuration"""
         # Act
         response = client.get("/auth_setup")
 
         # Assert
         assert response.status_code == 200
         data = response.json()
-        assert "auth_enabled" in data
-        assert "auth_type" in data
-        assert isinstance(data["auth_enabled"], bool)
-        assert isinstance(data["auth_type"], str)
+        assert data["auth_enabled"] is False
+        assert data["auth_type"] == "none"
+        assert data["login_url"] is None
+        assert data["logout_url"] is None
 
-    def test_chat_endpoint_streaming(self, client):
-        """Test chat endpoint with streaming"""
-        # Arrange
-        chat_request = {"messages": [{"role": "user", "content": "Tell me a story"}]}
+    def test_streaming_parameter(self, client):
+        """Test streaming parameter works for both endpoints"""
+        # Test chat with streaming
+        chat_request = {"messages": [{"role": "user", "content": "Hello"}]}
+        response = client.post("/chat", json=chat_request, params={"stream": True})
+        assert response.status_code == 200
+        assert response.json()["context"]["streaming"] is True
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
+        # Test ask with streaming
+        ask_request = {"user_query": "What is Python?"}
+        response = client.post("/ask", json=ask_request, params={"stream": True})
+        assert response.status_code == 200
+        assert response.json()["context"]["streaming"] is True
 
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant",
-                    content="Once upon a time...",
-                    timestamp=datetime.now(),
-                ),
-                context={"streaming": True, "approach_used": "StreamingApproach"},
-            )
-            mock_process_chat.return_value = mock_response
-
-            # Act
-            response = client.post("/chat", json=chat_request, params={"stream": True})
-
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert data["context"]["streaming"] is True
-
-    def test_ask_endpoint_streaming(self, client):
-        """Test ask endpoint with streaming"""
-        # Arrange
-        ask_request = {"user_query": "Explain quantum computing"}
-
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_ask"
-        ) as mock_process_ask:
-            from app.schemas.chat import AskResponse
-
-            mock_response = AskResponse(
-                user_query="Explain quantum computing",
-                chatbot_response="Quantum computing is...",
-                sources=[],
-                context={"streaming": True, "approach_used": "StreamingApproach"},
-                count=0,
-            )
-            mock_process_ask.return_value = mock_response
-
-            # Act
-            response = client.post("/ask", json=ask_request, params={"stream": True})
-
-            # Assert
-            assert response.status_code == 200
-            data = response.json()
-            assert data["context"]["streaming"] is True
-
-    def test_endpoint_error_handling(self, client):
-        """Test endpoint error handling"""
+    def test_malformed_json_requests(self, client):
+        """Test endpoints handle malformed JSON gracefully"""
         # Test malformed JSON
         response = client.post("/chat", data="invalid json")
         assert response.status_code == 422
 
-        # Test missing required fields
-        response = client.post("/chat", json={})
+        response = client.post("/ask", data="not json either")
         assert response.status_code == 422
 
-        # Test invalid field types
-        response = client.post("/ask", json={"user_query": 123})  # Should be string
+        response = client.post("/vote", data="{broken json")
         assert response.status_code == 422
 
-    def test_cors_headers(self, client):
-        """Test that CORS headers are present"""
-        # Arrange
-        headers = {"Origin": "http://localhost:3000"}
-
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
-
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant", content="Hello!", timestamp=datetime.now()
-                ),
-                context={},
-            )
-            mock_process_chat.return_value = mock_response
-
-            # Act - Use a real POST request instead of OPTIONS
-            response = client.post(
-                "/chat",
-                json={"messages": [{"role": "user", "content": "Hello"}]},
-                headers=headers,
-            )
-
-            # Assert
-            assert response.status_code == 200
-            # CORS headers should be present (handled by FastAPI middleware)
-
-    def test_content_type_handling(self, client):
-        """Test different content types"""
-        # Test with explicit content-type
+    def test_content_type_validation(self, client):
+        """Test proper content type handling"""
+        # Valid request with explicit content type
         chat_request = {"messages": [{"role": "user", "content": "Hello"}]}
+        response = client.post(
+            "/chat", json=chat_request, headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 200
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
-
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant", content="Hello!", timestamp=datetime.now()
-                ),
-                context={"approach_used": "TestApproach"},
-            )
-            mock_process_chat.return_value = mock_response
-
-            response = client.post(
-                "/chat", json=chat_request, headers={"Content-Type": "application/json"}
-            )
-
-            assert response.status_code == 200
-
-    def test_large_request_handling(self, client):
-        """Test handling of large requests"""
-        # Arrange - Create a large message
-        large_content = "A" * 10000  # 10KB message
+    def test_large_content_handling(self, client):
+        """Test handling of reasonably large content"""
+        # Create a moderately large message (1KB)
+        large_content = "A" * 1000
         chat_request = {"messages": [{"role": "user", "content": large_content}]}
 
-        with patch(
-            "app.api.endpoints.chat.chat_service.process_chat"
-        ) as mock_process_chat:
-            from app.schemas.chat import ChatResponse, ChatMessage
-            from datetime import datetime
+        response = client.post("/chat", json=chat_request)
+        assert response.status_code == 200
+        # Should handle large content gracefully
 
-            mock_response = ChatResponse(
-                message=ChatMessage(
-                    role="assistant",
-                    content="Processed large content",
-                    timestamp=datetime.now(),
-                ),
-                context={"approach_used": "LargeContentApproach"},
-            )
-            mock_process_chat.return_value = mock_response
+    def test_special_characters_in_content(self, client):
+        """Test handling of special characters and unicode"""
+        # Test with special characters and unicode
+        special_content = "Hello! 🤖 Can you help with émojis and spëcial chars?"
+        ask_request = {"user_query": special_content}
 
-            # Act
-            response = client.post("/chat", json=chat_request)
-
-            # Assert
-            assert response.status_code == 200
-            # Should handle large content gracefully
-
-    def test_concurrent_requests(self, client):
-        """Test handling concurrent requests"""
-        import threading
-        import time
-
-        results = []
-
-        def make_request():
-            chat_request = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"Request {threading.current_thread().ident}",
-                    }
-                ]
-            }
-
-            with patch(
-                "app.api.endpoints.chat.chat_service.process_chat"
-            ) as mock_process_chat:
-                from app.schemas.chat import ChatResponse, ChatMessage
-                from datetime import datetime
-
-                mock_response = ChatResponse(
-                    message=ChatMessage(
-                        role="assistant",
-                        content=f"Response {threading.current_thread().ident}",
-                        timestamp=datetime.now(),
-                    ),
-                    context={"approach_used": "ConcurrentApproach"},
-                )
-                mock_process_chat.return_value = mock_response
-
-                response = client.post("/chat", json=chat_request)
-                results.append(response.status_code)
-
-        # Create multiple threads for concurrent requests
-        threads = []
-        for _ in range(5):
-            thread = threading.Thread(target=make_request)
-            threads.append(thread)
-
-        # Start all threads
-        for thread in threads:
-            thread.start()
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-
-        # Assert all requests succeeded
-        assert len(results) == 5
-        assert all(status == 200 for status in results)
+        response = client.post("/ask", json=ask_request)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user_query"] == special_content

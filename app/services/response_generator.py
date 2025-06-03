@@ -8,39 +8,38 @@ class ResponseGenerator:
     async def generate_chat_response(
         self, user_message: str, context: Dict[str, Any]
     ) -> str:
-        """Generate a chat response (placeholder implementation)"""
-        logger.debug(f"Generating response for: {user_message[:30]}...")
+        """Generate a simple chat response"""
+        logger.debug(f"Generating chat response for: {user_message[:30]}...")
 
-        # This is where you would integrate with Azure OpenAI or other LLM services
-        # Placeholder response
-        return f"Thank you for your message: '{user_message}'. This is a placeholder response from the chat service."
+        # Simple chat response - this would integrate with actual LLM services
+        return (
+            f"Thank you for your message: '{user_message}'. How can I help you today?"
+        )
 
     async def generate_ask_response(self, query: str) -> str:
-        """Generate an ask response (placeholder implementation)"""
+        """Generate a simple ask response"""
         logger.debug(f"Generating ask response for: {query[:30]}...")
 
-        # This is where you would integrate with Azure OpenAI and search services
-        # Placeholder response
-        return f"Based on your query '{query}', here is a comprehensive response. This is a placeholder implementation."
+        # Simple ask response - this would integrate with search and LLM services
+        return f"Based on your question '{query}', here's what I found: This is a helpful response that addresses your query. Would you like me to elaborate on any specific part?"
 
     async def get_relevant_sources(self, query: str) -> List[Dict[str, Any]]:
-        """Get relevant sources for a query (placeholder implementation)"""
+        """Get mock relevant sources for a query"""
         logger.debug(f"Getting sources for: {query[:30]}...")
 
-        # This is where you would integrate with Azure Search or other search services
-        # Placeholder sources
+        # Mock sources - in real implementation this would search actual documents
         return [
             {
-                "title": "Sample Document 1",
-                "url": "/content/sample1.pdf",
-                "relevance_score": 0.95,
-                "excerpt": "This is a sample excerpt from document 1...",
+                "title": f"Document about {query[:20]}",
+                "url": "/content/doc1.pdf",
+                "relevance_score": 0.85,
+                "excerpt": f"This document contains relevant information about {query[:30]}...",
             },
             {
-                "title": "Sample Document 2",
-                "url": "/content/sample2.pdf",
-                "relevance_score": 0.87,
-                "excerpt": "This is a sample excerpt from document 2...",
+                "title": f"Reference guide for {query[:20]}",
+                "url": "/content/guide.pdf",
+                "relevance_score": 0.78,
+                "excerpt": f"Additional context and details related to {query[:30]}...",
             },
         ]
 
