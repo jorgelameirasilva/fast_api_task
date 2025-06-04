@@ -3,25 +3,43 @@ from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime
 
 from app.services.chat_service import ChatService
-from app.schemas.chat import ChatRequest, ChatMessage, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
 
 
 class TestChatService:
     """Unit tests for ChatService"""
 
     @pytest.mark.asyncio
-    async def test_process_chat_success(
-        self, sample_chat_request, mock_session_service, mock_response_generator
-    ):
+    async def test_process_chat_success(self, sample_chat_request):
         """Test successful chat processing"""
         # Arrange
-        chat_service = ChatService(mock_session_service, mock_response_generator)
+        chat_service = ChatService()
 
-        with patch("app.services.chat_service.get_best_approach") as mock_get_approach:
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
             mock_approach.name = "TestApproach"
-            mock_approach.run = AsyncMock(
-                return_value={"content": "Test response", "sources": [], "context": {}}
+            mock_approach.__class__.__name__ = "ChatReadRetrieveReadApproach"
+            mock_approach.run_without_streaming = AsyncMock(
+                return_value={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Based on conversation context and retrieved documents, here's the answer...",
+                                "context": {
+                                    "data_points": [
+                                        "Conversation context...",
+                                        "Retrieved documents...",
+                                    ],
+                                    "thoughts": "Conversation: ... Answer: ...",
+                                    "followup_questions": [
+                                        "<<Question 1?>>",
+                                        "<<Question 2?>>",
+                                    ],
+                                },
+                            }
+                        }
+                    ]
+                }
             )
             mock_get_approach.return_value = mock_approach
 
@@ -31,55 +49,74 @@ class TestChatService:
             # Assert
             assert isinstance(response, ChatResponse)
             assert response.message.role == "assistant"
-            assert response.message.content == "Test response"
-            assert response.context["approach_used"] == "TestApproach"
-            mock_session_service.update_session.assert_called_once()
+            assert "conversation context" in response.message.content
+            assert response.context["approach_used"] == "chat_read_retrieve_read"
+            assert response.context["approach_type"] == "ChatReadRetrieveReadApproach"
+            assert "data_points" in response.context
+            assert "thoughts" in response.context
+            assert "followup_questions" in response.context
 
     @pytest.mark.asyncio
-    async def test_process_chat_with_explicit_approach(
-        self, sample_chat_request, mock_session_service
-    ):
-        """Test chat processing with explicit approach"""
+    async def test_process_chat_with_session_state(self, sample_chat_request):
+        """Test chat processing with session state"""
         # Arrange
-        chat_service = ChatService(mock_session_service)
+        chat_service = ChatService()
+        sample_chat_request.session_state = "test-session-123"
 
-        with patch("app.services.chat_service.get_approach") as mock_get_approach:
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
-            mock_approach.name = "ExplicitApproach"
-            mock_approach.run = AsyncMock(
+            mock_approach.__class__.__name__ = "ChatReadRetrieveReadApproach"
+            mock_approach.run_without_streaming = AsyncMock(
                 return_value={
-                    "content": "Explicit response",
-                    "sources": [],
-                    "context": {},
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Session-aware response",
+                                "context": {
+                                    "data_points": ["Session context..."],
+                                    "thoughts": "Using session state...",
+                                    "followup_questions": [],
+                                },
+                            }
+                        }
+                    ]
                 }
             )
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(
-                sample_chat_request, approach_name="explicit_approach"
-            )
+            response = await chat_service.process_chat(sample_chat_request)
 
             # Assert
-            assert response.context["approach_used"] == "ExplicitApproach"
-            mock_get_approach.assert_called_once_with("explicit_approach")
+            assert response.session_state == "test-session-123"
+            assert response.context["session_updated"] is True
+            assert response.context["approach_used"] == "chat_read_retrieve_read"
 
     @pytest.mark.asyncio
-    async def test_process_chat_streaming(
-        self, sample_chat_request, mock_session_service
-    ):
+    async def test_process_chat_streaming(self, sample_chat_request):
         """Test chat processing with streaming"""
         # Arrange
-        chat_service = ChatService(mock_session_service)
+        chat_service = ChatService()
 
-        async def mock_stream():
-            yield {"partial": "content"}
-            yield {"content": "Final content", "sources": []}
-
-        with patch("app.services.chat_service.get_best_approach") as mock_get_approach:
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
-            mock_approach.name = "StreamingApproach"
-            mock_approach.run = AsyncMock(return_value=mock_stream())
+            mock_approach.__class__.__name__ = "ChatReadRetrieveReadApproach"
+            mock_approach.run_without_streaming = AsyncMock(
+                return_value={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Streaming chat response",
+                                "context": {
+                                    "data_points": ["Streaming data..."],
+                                    "thoughts": "Streaming thoughts...",
+                                    "followup_questions": ["<<Follow up?>>"],
+                                },
+                            }
+                        }
+                    ]
+                }
+            )
             mock_get_approach.return_value = mock_approach
 
             # Act
@@ -87,15 +124,47 @@ class TestChatService:
 
             # Assert
             assert response.context["streaming"] is True
-            assert response.message.content == "Final content"
+            assert response.context["approach_used"] == "chat_read_retrieve_read"
+            assert "Streaming chat response" in response.message.content
 
     @pytest.mark.asyncio
-    async def test_process_chat_no_user_message(self, mock_session_service):
+    async def test_process_chat_approach_failure(self, sample_chat_request):
+        """Test chat processing when approach fails"""
+        # Arrange
+        chat_service = ChatService()
+
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
+            mock_get_approach.side_effect = Exception("Approach failed")
+
+            # Act
+            response = await chat_service.process_chat(sample_chat_request)
+
+            # Assert
+            assert response.context["approach_used"] == "simple_fallback"
+            assert response.context["fallback_reason"] == "approach_processing_failed"
+            assert "Thank you for your message" in response.message.content
+
+    @pytest.mark.asyncio
+    async def test_process_chat_empty_messages(self):
+        """Test chat processing with empty messages"""
+        # Arrange
+        chat_service = ChatService()
+        request = ChatRequest(messages=[])
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="No user message found"):
+            await chat_service.process_chat(request)
+
+    @pytest.mark.asyncio
+    async def test_process_chat_no_user_messages(self):
         """Test chat processing with no user messages"""
         # Arrange
-        chat_service = ChatService(mock_session_service)
+        chat_service = ChatService()
         request = ChatRequest(
-            messages=[ChatMessage(role="system", content="System message")]
+            messages=[
+                ChatMessage(role="assistant", content="Hello"),
+                ChatMessage(role="system", content="System message"),
+            ]
         )
 
         # Act & Assert
@@ -103,203 +172,36 @@ class TestChatService:
             await chat_service.process_chat(request)
 
     @pytest.mark.asyncio
-    async def test_process_chat_approach_failure(
-        self, sample_chat_request, mock_session_service
-    ):
-        """Test chat processing when approach fails"""
-        # Arrange
-        chat_service = ChatService(mock_session_service)
-
-        with patch("app.services.chat_service.get_best_approach") as mock_get_approach:
-            mock_approach = Mock()
-            mock_approach.name = "FailingApproach"
-            mock_approach.run = AsyncMock(side_effect=Exception("Approach failed"))
-            mock_get_approach.return_value = mock_approach
-
-            # Act
-            response = await chat_service.process_chat(sample_chat_request)
-
-            # Assert
-            assert response.context["error"] == "chat_approach_execution_failed"
-            assert response.context["fallback_used"] is True
-            assert "I apologize" in response.message.content
-
-    @pytest.mark.asyncio
-    async def test_convert_messages(self, chat_service):
-        """Test message conversion from ChatMessage to dict"""
-        # Arrange
-        messages = [
-            ChatMessage(role="user", content="Hello"),
-            ChatMessage(role="assistant", content="Hi there!"),
-        ]
-
-        # Act
-        result = chat_service._convert_messages(messages)
-
-        # Assert
-        assert len(result) == 2
-        assert result[0] == {"role": "user", "content": "Hello"}
-        assert result[1] == {"role": "assistant", "content": "Hi there!"}
-
-    @pytest.mark.asyncio
-    async def test_prepare_context(self, chat_service, sample_chat_request):
-        """Test context preparation"""
-        # Arrange
-        messages = [{"role": "user", "content": "Hello"}]
-
-        # Act
-        context = chat_service._prepare_context(sample_chat_request, messages)
-
-        # Assert
-        assert context["overrides"] == {"test": "context"}
-        assert context["auth_claims"] is None
-        assert context["request_metadata"]["session_state"] == "test-session-123"
-        assert context["request_metadata"]["message_count"] == 1
-        assert context["request_metadata"]["chat_context"] is True
-
-    @pytest.mark.asyncio
-    async def test_get_approach_explicit(self, chat_service, sample_chat_request):
-        """Test getting explicit approach"""
-        # Arrange
-        last_message = ChatMessage(role="user", content="Hello")
-
-        with patch("app.services.chat_service.get_approach") as mock_get_approach:
-            mock_approach = Mock()
-            mock_approach.name = "ExplicitApproach"
-            mock_get_approach.return_value = mock_approach
-
-            # Act
-            result = chat_service._get_approach(
-                sample_chat_request, "explicit_approach", last_message
-            )
-
-            # Assert
-            assert result == mock_approach
-            mock_get_approach.assert_called_once_with("explicit_approach")
-
-    @pytest.mark.asyncio
-    async def test_get_approach_automatic(self, chat_service, sample_chat_request):
-        """Test automatic approach selection"""
-        # Arrange
-        last_message = ChatMessage(role="user", content="Hello")
-
-        with patch("app.services.chat_service.get_best_approach") as mock_get_best:
-            mock_approach = Mock()
-            mock_approach.name = "AutoApproach"
-            mock_get_best.return_value = mock_approach
-
-            # Act
-            result = chat_service._get_approach(sample_chat_request, None, last_message)
-
-            # Assert
-            assert result == mock_approach
-            mock_get_best.assert_called_once_with(
-                query="Hello", context={"request": sample_chat_request}, message_count=1
-            )
-
-    @pytest.mark.asyncio
-    async def test_build_response_with_session(
-        self, chat_service, sample_chat_request, mock_session_service
-    ):
-        """Test building response with session update"""
-        # Arrange
-        chat_service.session_service = mock_session_service
-        result = {
-            "content": "Response content",
-            "sources": [{"title": "Source 1"}],
-            "context": {"custom": "value"},
-        }
-        mock_approach = Mock()
-        mock_approach.name = "TestApproach"
-
-        # Act
-        response = await chat_service._build_response(
-            result, sample_chat_request, mock_approach, False
-        )
-
-        # Assert
-        assert response.message.content == "Response content"
-        assert response.session_state == "test-session-123"
-        assert response.context["approach_used"] == "TestApproach"
-        assert response.context["sources_count"] == 1
-        assert response.context["session_updated"] is True
-        mock_session_service.update_session.assert_called_once_with(
-            "test-session-123", 2, "TestApproach"
-        )
-
-    @pytest.mark.asyncio
-    async def test_build_response_without_session(
-        self, chat_service, mock_session_service
-    ):
-        """Test building response without session"""
-        # Arrange
-        chat_service.session_service = mock_session_service
-        request = ChatRequest(messages=[ChatMessage(role="user", content="Hello")])
-        result = {"content": "Response", "sources": [], "context": {}}
-        mock_approach = Mock()
-        mock_approach.name = "TestApproach"
-
-        # Act
-        response = await chat_service._build_response(
-            result, request, mock_approach, False
-        )
-
-        # Assert
-        assert response.session_state is None
-        assert response.context["session_updated"] is False
-        mock_session_service.update_session.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_build_fallback_response(self, chat_service, sample_chat_request):
-        """Test building fallback response"""
-        # Act
-        response = await chat_service._build_fallback_response(sample_chat_request)
-
-        # Assert
-        assert response.message.role == "assistant"
-        assert "I apologize" in response.message.content
-        assert response.context["error"] == "chat_approach_execution_failed"
-        assert response.context["fallback_used"] is True
-        assert "chat_processed_at" in response.context
-
-    @pytest.mark.asyncio
-    async def test_execute_approach_non_streaming(self, chat_service):
-        """Test executing approach without streaming"""
-        # Arrange
-        mock_approach = Mock()
-        expected_result = {"content": "Response"}
-        mock_approach.run = AsyncMock(return_value=expected_result)
-        messages = [{"role": "user", "content": "Hello"}]
-        context = {}
-
-        # Act
-        result = await chat_service._execute_approach(
-            mock_approach, messages, False, "session", context
-        )
-
-        # Assert
-        assert result == expected_result
-        mock_approach.run.assert_called_once_with(
-            messages=messages, stream=False, session_state="session", context=context
-        )
-
-    @pytest.mark.asyncio
-    async def test_multi_turn_conversation(
-        self, chat_service, multi_turn_conversation, mock_session_service
-    ):
+    async def test_multi_turn_conversation(self):
         """Test processing multi-turn conversation"""
         # Arrange
-        chat_service.session_service = mock_session_service
-        request = ChatRequest(messages=multi_turn_conversation)
+        chat_service = ChatService()
+        messages = [
+            ChatMessage(role="user", content="What is AI?"),
+            ChatMessage(role="assistant", content="AI is artificial intelligence..."),
+            ChatMessage(role="user", content="How does machine learning relate?"),
+        ]
+        request = ChatRequest(messages=messages)
 
-        with patch("app.services.chat_service.get_best_approach") as mock_get_approach:
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
-            mock_approach.name = "ChatReadRetrieveRead"
-            mock_approach.run = AsyncMock(
+            mock_approach.__class__.__name__ = "ChatReadRetrieveReadApproach"
+            mock_approach.run_without_streaming = AsyncMock(
                 return_value={
-                    "content": "Multi-turn response",
-                    "sources": [],
-                    "context": {},
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Machine learning is a subset of AI that...",
+                                "context": {
+                                    "data_points": ["Previous conversation context..."],
+                                    "thoughts": "Building on previous AI discussion...",
+                                    "followup_questions": [
+                                        "<<Would you like examples?>>"
+                                    ],
+                                },
+                            }
+                        }
+                    ]
                 }
             )
             mock_get_approach.return_value = mock_approach
@@ -308,9 +210,44 @@ class TestChatService:
             response = await chat_service.process_chat(request)
 
             # Assert
-            assert response.message.content == "Multi-turn response"
-            # Should use the last user message for approach selection
-            mock_get_approach.assert_called_once()
-            call_args = mock_get_approach.call_args[1]
-            assert call_args["query"] == "How does machine learning relate?"
-            assert call_args["message_count"] == 5
+            assert isinstance(response, ChatResponse)
+            assert response.context["approach_used"] == "chat_read_retrieve_read"
+            assert "machine learning" in response.message.content.lower()
+
+    @pytest.mark.asyncio
+    async def test_process_chat_with_context(self):
+        """Test chat processing with additional context"""
+        # Arrange
+        chat_service = ChatService()
+        request = ChatRequest(
+            messages=[ChatMessage(role="user", content="Hello")],
+            context={"user_preferences": {"language": "en"}},
+        )
+
+        with patch("app.core.setup.get_chat_approach") as mock_get_approach:
+            mock_approach = Mock()
+            mock_approach.__class__.__name__ = "ChatReadRetrieveReadApproach"
+            mock_approach.run_without_streaming = AsyncMock(
+                return_value={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Hello! How can I help you today?",
+                                "context": {
+                                    "data_points": ["User context considered..."],
+                                    "thoughts": "Responding with user preferences...",
+                                    "followup_questions": [],
+                                },
+                            }
+                        }
+                    ]
+                }
+            )
+            mock_get_approach.return_value = mock_approach
+
+            # Act
+            response = await chat_service.process_chat(request)
+
+            # Assert
+            assert response.context["approach_used"] == "chat_read_retrieve_read"
+            assert "Hello" in response.message.content

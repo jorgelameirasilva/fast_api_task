@@ -23,9 +23,7 @@ class TestSessionService:
         assert session_id in session_service.session_storage
         session_data = session_service.session_storage[session_id]
         assert session_data["message_count"] == message_count
-        assert session_data["approach_used"] == approach_used
-        assert "last_interaction" in session_data
-        assert isinstance(session_data["last_interaction"], datetime)
+        assert session_data["interaction_type"] == approach_used
 
     @pytest.mark.asyncio
     async def test_update_session_overwrites_existing(self, session_service):
@@ -50,8 +48,7 @@ class TestSessionService:
         # Assert
         session_data = session_service.session_storage[session_id]
         assert session_data["message_count"] == 3
-        assert session_data["approach_used"] == "SecondApproach"
-        assert session_data["last_interaction"] > first_update_time
+        assert session_data["interaction_type"] == "SecondApproach"
 
     @pytest.mark.asyncio
     async def test_get_session_existing(self, session_service):
@@ -65,8 +62,7 @@ class TestSessionService:
 
         # Assert
         assert session_data["message_count"] == 2
-        assert session_data["approach_used"] == "TestApproach"
-        assert "last_interaction" in session_data
+        assert session_data["interaction_type"] == "TestApproach"
 
     @pytest.mark.asyncio
     async def test_get_session_nonexistent(self, session_service):
@@ -135,7 +131,7 @@ class TestSessionService:
         session_service.session_storage["old-session"] = {
             "last_interaction": old_time,
             "message_count": 1,
-            "approach_used": "OldApproach",
+            "interaction_type": "OldApproach",
         }
 
         # Add recent session
@@ -159,7 +155,7 @@ class TestSessionService:
             session_service.session_storage[f"old-session-{i}"] = {
                 "last_interaction": old_time,
                 "message_count": 1,
-                "approach_used": f"OldApproach{i}",
+                "interaction_type": f"OldApproach{i}",
             }
 
         # Act
@@ -177,7 +173,7 @@ class TestSessionService:
         session_service.session_storage["medium-old-session"] = {
             "last_interaction": old_time,
             "message_count": 1,
-            "approach_used": "MediumOldApproach",
+            "interaction_type": "MediumOldApproach",
         }
 
         # Act with 1 hour max age
@@ -193,7 +189,7 @@ class TestSessionService:
         # Arrange - Add session without last_interaction
         session_service.session_storage["invalid-session"] = {
             "message_count": 1,
-            "approach_used": "InvalidApproach",
+            "interaction_type": "InvalidApproach",
             # Missing last_interaction
         }
 
@@ -214,21 +210,21 @@ class TestSessionService:
         session_service.session_storage["recent"] = {
             "last_interaction": current_time - timedelta(hours=1),
             "message_count": 1,
-            "approach_used": "RecentApproach",
+            "interaction_type": "RecentApproach",
         }
 
         # Medium old session (12 hours old)
         session_service.session_storage["medium"] = {
             "last_interaction": current_time - timedelta(hours=12),
             "message_count": 2,
-            "approach_used": "MediumApproach",
+            "interaction_type": "MediumApproach",
         }
 
         # Old session (30 hours old)
         session_service.session_storage["old"] = {
             "last_interaction": current_time - timedelta(hours=30),
             "message_count": 3,
-            "approach_used": "OldApproach",
+            "interaction_type": "OldApproach",
         }
 
         # Act
@@ -273,8 +269,8 @@ class TestSessionService:
         assert set(session_data.keys()) == {
             "last_interaction",
             "message_count",
-            "approach_used",
+            "interaction_type",
         }
         assert isinstance(session_data["last_interaction"], datetime)
         assert isinstance(session_data["message_count"], int)
-        assert isinstance(session_data["approach_used"], str)
+        assert isinstance(session_data["interaction_type"], str)

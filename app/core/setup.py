@@ -379,16 +379,110 @@ class MockBlobClient:
 
 
 class MockOpenAIClient:
-    """Mock OpenAI client for development"""
+    """Mock OpenAI client for development that follows real OpenAI API structure"""
 
     class Chat:
         class Completions:
-            async def create(self, *args, **kwargs):
-                return {"choices": [{"message": {"content": "Mock response"}}]}
+            async def create(self, messages=None, model="gpt-3.5-turbo", **kwargs):
+                """Mock chat completion that follows OpenAI ChatCompletion structure"""
+                import time
+                import uuid
+
+                # Extract the last user message for generating response
+                user_query = "Hello"
+                if messages and len(messages) > 0:
+                    user_query = messages[-1].get("content", "Hello")
+
+                # Generate appropriate mock response based on the query
+                if "health" in user_query.lower() or "employee" in user_query.lower():
+                    content = f"Based on the conversation context and retrieved documents, here's the answer to '{user_query}': This is a comprehensive response generated using the Chat-Read-Retrieve-Read approach. The system analyzed the conversation history, retrieved relevant documents, and generated this contextual answer about health benefits and employee policies."
+                elif (
+                    "ai" in user_query.lower()
+                    or "artificial intelligence" in user_query.lower()
+                ):
+                    content = f"Based on the retrieved documents, here's the answer to '{user_query}': This is a comprehensive response generated using the Retrieve-Then-Read approach. The system retrieved relevant documents and used them to generate this contextual answer about artificial intelligence."
+                else:
+                    content = f"Based on the conversation context and retrieved documents, here's the answer to '{user_query}': This is a comprehensive response generated using the Chat-Read-Retrieve-Read approach. The system analyzed the conversation history, retrieved relevant documents, and generated this contextual answer."
+
+                return {
+                    "id": f"chatcmpl-{uuid.uuid4().hex[:29]}",
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "index": 0,
+                            "logprobs": None,
+                            "message": {
+                                "content": content,
+                                "refusal": None,
+                                "role": "assistant",
+                                "audio": None,
+                                "function_call": None,
+                                "tool_calls": None,
+                                "context": {
+                                    "data_points": [
+                                        f"Conversation context for: {user_query}",
+                                        f"Retrieved documents about: {user_query}",
+                                        f"Additional information related to: {user_query}",
+                                    ],
+                                    "thoughts": f"Conversation: {user_query}\nAnswer: {content[:100]}...",
+                                    "followup_questions": [
+                                        f"<<Can you tell me more about {user_query[:20]}?>>",
+                                        f"<<What are the details of {user_query[:20]}?>>",
+                                        f"<<Are there any exceptions for {user_query[:20]}?>>",
+                                    ],
+                                },
+                            },
+                        }
+                    ],
+                    "created": int(time.time()),
+                    "model": model,
+                    "object": "chat.completion",
+                    "service_tier": None,
+                    "system_fingerprint": f"fp_{uuid.uuid4().hex[:8]}",
+                    "usage": {
+                        "completion_tokens": len(content.split()),
+                        "prompt_tokens": sum(
+                            len(msg.get("content", "").split())
+                            for msg in (messages or [])
+                        ),
+                        "total_tokens": len(content.split())
+                        + sum(
+                            len(msg.get("content", "").split())
+                            for msg in (messages or [])
+                        ),
+                    },
+                }
 
     class Embeddings:
-        async def create(self, *args, **kwargs):
-            return {"data": [{"embedding": [0.1] * 1536}]}
+        async def create(self, input=None, model="text-embedding-ada-002", **kwargs):
+            """Mock embeddings that follows OpenAI Embeddings structure"""
+            import uuid
+
+            # Handle both string and list inputs
+            if isinstance(input, str):
+                input_list = [input]
+            elif isinstance(input, list):
+                input_list = input
+            else:
+                input_list = [""]
+
+            return {
+                "object": "list",
+                "data": [
+                    {
+                        "object": "embedding",
+                        "index": i,
+                        "embedding": [0.1 + (i * 0.01)]
+                        * 1536,  # Mock 1536-dimensional embedding
+                    }
+                    for i, text in enumerate(input_list)
+                ],
+                "model": model,
+                "usage": {
+                    "prompt_tokens": sum(len(text.split()) for text in input_list),
+                    "total_tokens": sum(len(text.split()) for text in input_list),
+                },
+            }
 
     def __init__(self):
         self.chat = self.Chat()

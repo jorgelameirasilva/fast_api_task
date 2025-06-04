@@ -21,7 +21,7 @@ class TestResponseGenerator:
         assert isinstance(response, str)
         assert len(response) > 0
         assert user_message in response  # Should include original message
-        assert "placeholder response" in response.lower()
+        assert "thank you" in response.lower()
 
     @pytest.mark.asyncio
     async def test_generate_chat_response_empty_message(self, response_generator):
@@ -38,7 +38,7 @@ class TestResponseGenerator:
         # Assert
         assert isinstance(response, str)
         assert len(response) > 0
-        assert "placeholder response" in response.lower()
+        assert "thank you" in response.lower()
 
     @pytest.mark.asyncio
     async def test_generate_chat_response_long_message(self, response_generator):
@@ -87,7 +87,7 @@ class TestResponseGenerator:
         assert isinstance(response, str)
         assert len(response) > 0
         assert query in response  # Should include original query
-        assert "comprehensive response" in response.lower()
+        assert "helpful response" in response.lower()
 
     @pytest.mark.asyncio
     async def test_generate_ask_response_empty_query(self, response_generator):
