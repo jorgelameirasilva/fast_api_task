@@ -6,6 +6,11 @@ from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
     ChatMessage,
+    ChatContext,
+    Overrides,
+    ChatChoice,
+    ChatDelta,
+    ChatContentData,
 )
 from app.core.config import settings
 from app.services.session_service import SessionService
@@ -63,9 +68,14 @@ class ChatService:
             for msg in request.messages:
                 messages.append({"role": msg.role, "content": msg.content})
 
+            # Extract overrides from structured context
+            overrides = {}
+            if request.context and request.context.overrides:
+                overrides = request.context.overrides.model_dump(exclude_none=True)
+
             # Prepare context for approach - match old code structure
             context = {
-                "overrides": request.context or {},
+                "overrides": overrides,
                 "auth_claims": {},
             }
 
@@ -79,14 +89,14 @@ class ChatService:
                 # The streaming functionality can be enhanced later for actual streaming responses
                 approach_result = await chat_approach.run_without_streaming(
                     messages=messages,
-                    overrides=context.get("overrides", {}),
+                    overrides=overrides,
                     auth_claims=context.get("auth_claims", {}),
                     session_state=request.session_state,
                 )
             else:
                 approach_result = await chat_approach.run_without_streaming(
                     messages=messages,
-                    overrides=context.get("overrides", {}),
+                    overrides=overrides,
                     auth_claims=context.get("auth_claims", {}),
                     session_state=request.session_state,
                 )
@@ -97,9 +107,37 @@ class ChatService:
                 message_content = choice["message"]["content"]
                 message_context = choice["message"].get("context", {})
 
-                response_message = ChatMessage(
-                    role="assistant", content=message_content, timestamp=datetime.now()
-                )
+                # Create the choice object based on whether it's streaming or not
+                if stream:
+                    # For streaming responses, use delta format
+                    chat_choice = ChatChoice(
+                        delta=ChatDelta(role="assistant", content=message_content),
+                        content=ChatContentData(
+                            data_points=message_context.get("data_points", []),
+                            thoughts=message_context.get("thoughts", ""),
+                        ),
+                        function_call=None,
+                        tool_calls=None,
+                        finish_reason=choice.get("finish_reason"),
+                    )
+                else:
+                    # For non-streaming responses, use complete message format
+                    response_message = ChatMessage(
+                        role="assistant",
+                        content=message_content,
+                        timestamp=datetime.now(),
+                    )
+
+                    chat_choice = ChatChoice(
+                        message=response_message,
+                        content=ChatContentData(
+                            data_points=message_context.get("data_points", []),
+                            thoughts=message_context.get("thoughts", ""),
+                        ),
+                        function_call=None,
+                        tool_calls=None,
+                        finish_reason=choice.get("finish_reason"),
+                    )
 
                 # Update session if needed
                 if request.session_state:
@@ -109,19 +147,12 @@ class ChatService:
                         "chat_approach",
                     )
 
-                # Build response context - include approach details
-                response_context = {
-                    **(request.context or {}),
-                    "approach_used": "chat_read_retrieve_read",
-                    "approach_type": chat_approach.__class__.__name__,
-                    "streaming": stream,
-                    "session_updated": request.session_state is not None,
-                    "chat_processed_at": datetime.now().isoformat(),
-                    **message_context,
-                }
+                # Build response context - include approach details and preserve structure
+                response_overrides = Overrides(**overrides) if overrides else None
+                response_context = ChatContext(overrides=response_overrides)
 
                 return ChatResponse(
-                    message=response_message,
+                    choices=[chat_choice],
                     session_state=request.session_state,
                     context=response_context,
                 )
@@ -144,14 +175,28 @@ class ChatService:
         last_user_message = user_messages[-1].content
 
         # Generate a simple response
+        context_dict = {}
+        if request.context and request.context.overrides:
+            context_dict = request.context.overrides.model_dump(exclude_none=True)
+
         response_content = await self._generate_chat_response(
-            last_user_message, request.context or {}
+            last_user_message, context_dict
         )
 
-        # Create response message
-        response_message = ChatMessage(
-            role="assistant", content=response_content, timestamp=datetime.now()
-        )
+        # Create choice object
+        if stream:
+            chat_choice = ChatChoice(
+                delta=ChatDelta(role="assistant", content=response_content),
+                function_call=None,
+                tool_calls=None,
+            )
+        else:
+            response_message = ChatMessage(
+                role="assistant", content=response_content, timestamp=datetime.now()
+            )
+            chat_choice = ChatChoice(
+                message=response_message, function_call=None, tool_calls=None
+            )
 
         # Update session if needed
         if request.session_state:
@@ -159,18 +204,11 @@ class ChatService:
                 request.session_state, len(request.messages) + 1, "chat_simple"
             )
 
-        # Build context
-        response_context = {
-            **(request.context or {}),
-            "approach_used": "simple_fallback",
-            "streaming": stream,
-            "session_updated": request.session_state is not None,
-            "chat_processed_at": datetime.now().isoformat(),
-            "fallback_reason": "approach_processing_failed",
-        }
+        # Build context - preserve the original structure if it exists
+        response_context = request.context or ChatContext()
 
         return ChatResponse(
-            message=response_message,
+            choices=[chat_choice],
             session_state=request.session_state,
             context=response_context,
         )
