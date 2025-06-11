@@ -119,94 +119,31 @@ class ChatService:
                 raise ValueError("No chat approach configured")
 
             # Convert messages to the format expected by approaches
-            messages = []
-            for msg in request.messages:
-                messages.append({"role": msg.role, "content": msg.content})
+            messages = self._convert_messages_for_approach(request.messages)
 
             # Extract overrides from structured context
-            overrides = {}
-            if request.context and request.context.overrides:
-                overrides = request.context.overrides.model_dump(exclude_none=True)
+            overrides = self._extract_overrides(request.context)
 
             # Extract auth claims from current user (separation of concerns)
             auth_claims = self._extract_auth_claims(current_user)
 
-            # Run the approach based on streaming preference
-            if stream:
-                # For now, treat streaming the same as non-streaming for response structure
-                # The streaming functionality can be enhanced later for actual streaming responses
-                approach_result = await chat_approach.run_without_streaming(
-                    messages=messages,
-                    overrides=overrides,
-                    auth_claims=auth_claims,
-                    session_state=request.session_state,
-                )
-            else:
-                approach_result = await chat_approach.run_without_streaming(
-                    messages=messages,
-                    overrides=overrides,
-                    auth_claims=auth_claims,
-                    session_state=request.session_state,
-                )
+            # Run the approach
+            approach_result = await chat_approach.run_without_streaming(
+                messages=messages,
+                overrides=overrides,
+                auth_claims=auth_claims,
+                session_state=request.session_state,
+            )
+
+            # Update session if needed
+            await self._update_session_if_needed(
+                request.session_state, len(request.messages) + 1, "chat_approach"
+            )
 
             # Convert approach result to ChatResponse
-            if isinstance(approach_result, dict) and "choices" in approach_result:
-                choice = approach_result["choices"][0]
-                message_content = choice["message"]["content"]
-                message_context = choice["message"].get("context", {})
-
-                # Create the choice object based on whether it's streaming or not
-                if stream:
-                    # For streaming responses, use delta format
-                    chat_choice = ChatChoice(
-                        delta=ChatDelta(role="assistant", content=message_content),
-                        content=ChatContentData(
-                            data_points=message_context.get("data_points", []),
-                            thoughts=message_context.get("thoughts", ""),
-                        ),
-                        function_call=None,
-                        tool_calls=None,
-                        finish_reason=choice.get("finish_reason"),
-                    )
-                else:
-                    # For non-streaming responses, use complete message format
-                    response_message = ChatMessage(
-                        role="assistant",
-                        content=message_content,
-                        timestamp=datetime.now(),
-                    )
-
-                    chat_choice = ChatChoice(
-                        message=response_message,
-                        content=ChatContentData(
-                            data_points=message_context.get("data_points", []),
-                            thoughts=message_context.get("thoughts", ""),
-                        ),
-                        function_call=None,
-                        tool_calls=None,
-                        finish_reason=choice.get("finish_reason"),
-                    )
-
-                # Update session if needed
-                if request.session_state:
-                    await self.session_service.update_session(
-                        request.session_state,
-                        len(request.messages) + 1,
-                        "chat_approach",
-                    )
-
-                # Build response context - include approach details and preserve structure
-                response_overrides = Overrides(**overrides) if overrides else None
-                response_context = ChatContext(overrides=response_overrides)
-
-                return ChatResponse(
-                    choices=[chat_choice],
-                    session_state=request.session_state,
-                    context=response_context,
-                )
-
-            else:
-                raise ValueError("Invalid approach result format")
+            return self._create_chat_response_from_approach(
+                approach_result, request, overrides, stream
+            )
 
         except Exception as e:
             logger.error(f"Approach processing failed: {e}")
@@ -228,34 +165,115 @@ class ChatService:
         last_user_message = user_messages[-1].content
 
         # Generate a simple response
-        context_dict = {}
-        if request.context and request.context.overrides:
-            context_dict = request.context.overrides.model_dump(exclude_none=True)
-
+        context_dict = self._extract_overrides(request.context)
         response_content = await self._generate_chat_response(
             last_user_message, context_dict
         )
 
-        # Create choice object
-        if stream:
-            chat_choice = ChatChoice(
-                delta=ChatDelta(role="assistant", content=response_content),
-                function_call=None,
-                tool_calls=None,
-            )
-        else:
-            response_message = ChatMessage(
-                role="assistant", content=response_content, timestamp=datetime.now()
-            )
-            chat_choice = ChatChoice(
-                message=response_message, function_call=None, tool_calls=None
+        # Update session if needed
+        await self._update_session_if_needed(
+            request.session_state, len(request.messages) + 1, "chat_simple"
+        )
+
+        # Create simple response
+        return self._create_simple_chat_response(response_content, request, stream)
+
+    # === Helper Methods for Single Responsibility ===
+
+    def _convert_messages_for_approach(
+        self, messages: List[ChatMessage]
+    ) -> List[Dict[str, str]]:
+        """Convert ChatMessage objects to format expected by approaches"""
+        return [{"role": msg.role, "content": msg.content} for msg in messages]
+
+    def _extract_overrides(self, context: Optional[ChatContext]) -> Dict[str, Any]:
+        """Extract overrides from chat context"""
+        if context and context.overrides:
+            return context.overrides.model_dump(exclude_none=True)
+        return {}
+
+    async def _update_session_if_needed(
+        self, session_state: Optional[str], message_count: int, interaction_type: str
+    ) -> None:
+        """Update session if session_state is provided"""
+        if session_state:
+            await self.session_service.update_session(
+                session_state, message_count, interaction_type
             )
 
-        # Update session if needed
-        if request.session_state:
-            await self.session_service.update_session(
-                request.session_state, len(request.messages) + 1, "chat_simple"
+    def _create_chat_response_from_approach(
+        self,
+        approach_result: Dict[str, Any],
+        request: ChatRequest,
+        overrides: Dict[str, Any],
+        stream: bool,
+    ) -> ChatResponse:
+        """Create ChatResponse from approach result - follows SRP"""
+        if not isinstance(approach_result, dict) or "choices" not in approach_result:
+            raise ValueError("Invalid approach result format")
+
+        choice = approach_result["choices"][0]
+        message_content = choice["message"]["content"]
+        message_context = choice["message"].get("context", {})
+
+        # Create the choice object
+        chat_choice = self._create_chat_choice_from_approach(
+            message_content, message_context, choice, stream
+        )
+
+        # Build response context
+        response_context = self._build_response_context(overrides)
+
+        return ChatResponse(
+            choices=[chat_choice],
+            session_state=request.session_state,
+            context=response_context,
+        )
+
+    def _create_chat_choice_from_approach(
+        self,
+        message_content: str,
+        message_context: Dict[str, Any],
+        choice: Dict[str, Any],
+        stream: bool,
+    ) -> ChatChoice:
+        """Create ChatChoice object from approach data - follows SRP"""
+        content_data = ChatContentData(
+            data_points=message_context.get("data_points", []),
+            thoughts=message_context.get("thoughts", ""),
+        )
+
+        if stream:
+            # For streaming responses, use delta format
+            return ChatChoice(
+                delta=ChatDelta(role="assistant", content=message_content),
+                content=content_data,
+                function_call=None,
+                tool_calls=None,
+                finish_reason=choice.get("finish_reason"),
             )
+        else:
+            # For non-streaming responses, use complete message format
+            response_message = ChatMessage(
+                role="assistant",
+                content=message_content,
+                timestamp=datetime.now(),
+            )
+
+            return ChatChoice(
+                message=response_message,
+                content=content_data,
+                function_call=None,
+                tool_calls=None,
+                finish_reason=choice.get("finish_reason"),
+            )
+
+    def _create_simple_chat_response(
+        self, response_content: str, request: ChatRequest, stream: bool
+    ) -> ChatResponse:
+        """Create ChatResponse for simple processing - follows SRP"""
+        # Create choice object
+        chat_choice = self._create_simple_chat_choice(response_content, stream)
 
         # Build context - preserve the original structure if it exists
         response_context = request.context or ChatContext()
@@ -265,6 +283,29 @@ class ChatService:
             session_state=request.session_state,
             context=response_context,
         )
+
+    def _create_simple_chat_choice(
+        self, response_content: str, stream: bool
+    ) -> ChatChoice:
+        """Create ChatChoice for simple responses - follows SRP"""
+        if stream:
+            return ChatChoice(
+                delta=ChatDelta(role="assistant", content=response_content),
+                function_call=None,
+                tool_calls=None,
+            )
+        else:
+            response_message = ChatMessage(
+                role="assistant", content=response_content, timestamp=datetime.now()
+            )
+            return ChatChoice(
+                message=response_message, function_call=None, tool_calls=None
+            )
+
+    def _build_response_context(self, overrides: Dict[str, Any]) -> ChatContext:
+        """Build response context from overrides - follows SRP"""
+        response_overrides = Overrides(**overrides) if overrides else None
+        return ChatContext(overrides=response_overrides)
 
     async def _generate_chat_response(
         self, user_message: str, context: Dict[str, Any]
