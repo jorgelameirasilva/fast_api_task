@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status, HTTPException, Query
+from fastapi import APIRouter, status, HTTPException, Query, Depends
 from loguru import logger
 from typing import Optional
 
@@ -12,38 +12,44 @@ from app.schemas.chat import (
     AuthSetupResponse,
 )
 
-# Import the correct services
-from app.services.chat_service import chat_service
+# Import services
 from app.services.ask_service import ask_service
 from app.services.vote_service import vote_service
 from app.services.auth_service import auth_service
 
+# Import dependencies
+from app.core.dependencies import get_chat_service
+from app.auth import get_current_user, AuthUser
+from app.core.config import settings
+
+# Clean router - auth applied per endpoint where needed
 router = APIRouter()
 
 
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def chat(
     request: ChatRequest,
+    current_user: AuthUser = Depends(get_current_user),  # Auth + user object
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
     Handle chat conversations using approaches
+    Requires JWT authentication
     """
-    logger.info("Chat endpoint called")
+    logger.info(f"Chat endpoint called by user: {current_user.user_id}")
 
     try:
-        # Ensure we have valid messages
+        # Validate request
         if not request.messages:
             raise ValueError("Request must contain messages")
 
-        # Process using the approach system
-        response = await chat_service.process_chat(request=request, stream=stream)
-
-        # Log successful processing
-        logger.info(
-            f"Chat processed successfully using approach: {response.context.get('approach_used', 'unknown')}"
+        # Get chat service and process request
+        chat_service = get_chat_service()
+        response = await chat_service.process_chat(
+            request=request, stream=stream, current_user=current_user
         )
 
+        logger.info(f"Chat processed successfully for user: {current_user.user_id}")
         return response
 
     except ValueError as e:
@@ -57,12 +63,14 @@ async def chat(
 @router.post("/ask", response_model=AskResponse, status_code=status.HTTP_200_OK)
 async def ask(
     request: AskRequest,
+    current_user: AuthUser = Depends(get_current_user),  # Auth + user object
     stream: bool = Query(False, description="Whether to stream the response"),
 ):
     """
     Handle user queries using approaches
+    Requires JWT authentication
     """
-    logger.info(f"Ask endpoint called with query: {request.user_query[:50]}...")
+    logger.info(f"Ask endpoint called by user: {current_user.user_id}")
 
     try:
         # Validate request
@@ -72,11 +80,7 @@ async def ask(
         # Process using the approach system
         response = await ask_service.process_ask(request, stream=stream)
 
-        # Log successful processing
-        logger.info(
-            f"Ask processed successfully using approach: {response.context.get('approach_used', 'unknown')}"
-        )
-
+        logger.info(f"Ask processed successfully for user: {current_user.user_id}")
         return response
 
     except ValueError as e:
@@ -88,11 +92,15 @@ async def ask(
 
 
 @router.post("/vote", response_model=VoteResponse, status_code=status.HTTP_200_OK)
-async def vote(request: VoteRequest):
+async def vote(
+    request: VoteRequest,
+    current_user: AuthUser = Depends(get_current_user),  # Auth + user object
+):
     """
     Handle user feedback/voting on responses
+    Requires JWT authentication
     """
-    logger.info(f"Vote endpoint called: upvote={request.upvote}")
+    logger.info(f"Vote endpoint called by user: {current_user.user_id}")
     try:
         response = await vote_service.process_vote(request)
         return response
@@ -110,6 +118,7 @@ async def vote(request: VoteRequest):
 async def auth_setup():
     """
     Get authentication setup configuration
+    Public endpoint - no authentication required
     """
     logger.info("Auth setup endpoint called")
     try:

@@ -1,11 +1,12 @@
 import pytest
 from typing import Generator
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 from app.main import app
 from app.schemas.chat import ChatMessage, ChatRequest, AskRequest, VoteRequest
+from app.auth.models import AuthUser
 from app.services import (
     ChatService,
     AskService,
@@ -60,6 +61,65 @@ def session_service():
 def response_generator():
     """Create a fresh ResponseGenerator instance for testing."""
     return ResponseGenerator()
+
+
+# Authentication Fixtures
+@pytest.fixture
+def test_user():
+    """Create a test user for authentication testing."""
+    return AuthUser(
+        sub="test-user-123",
+        email="test@example.com",
+        name="Test User",
+        preferred_username="testuser",
+        roles=["user"],
+        scope="read write",
+    )
+
+
+@pytest.fixture
+def admin_user():
+    """Create an admin user for testing."""
+    return AuthUser(
+        sub="admin-user-456",
+        email="admin@example.com",
+        name="Admin User",
+        preferred_username="adminuser",
+        roles=["admin", "user"],
+        scope="read write delete admin",
+    )
+
+
+@pytest.fixture
+def mock_get_current_user(test_user):
+    """Mock the get_current_user dependency to return test user."""
+    with patch("app.auth.dependencies.get_current_user") as mock:
+        mock.return_value = test_user
+        yield mock
+
+
+@pytest.fixture
+def mock_jwt_authenticator():
+    """Mock JWT authenticator for testing."""
+    with patch("app.auth.jwt.get_jwt_authenticator") as mock:
+        mock_auth = Mock()
+        mock_auth.validate_and_extract_user.return_value = AuthUser(
+            sub="test-user-123", email="test@example.com"
+        )
+        mock.return_value = mock_auth
+        yield mock_auth
+
+
+@pytest.fixture
+def auth_headers():
+    """Create auth headers with a test JWT token."""
+    return {"Authorization": "Bearer test-jwt-token"}
+
+
+@pytest.fixture
+def authenticated_client(client, mock_get_current_user):
+    """Create an authenticated test client."""
+    return client
 
 
 # Mock Fixtures

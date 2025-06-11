@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     # Legacy AUTH_ENABLED for backward compatibility
     AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "false").lower() == "true"
 
+    APIM_KEY: str = os.getenv("APIM_KEY", "")
+    APIM_ONELOGIN_URL: str = os.getenv("APIM_ONELOGIN_URL", "")
+    APIM_BASE_URL: str = os.getenv("APIM_BASE_URL", "")
+    SECURE_GPT_API_VERSION: str = os.getenv("SECURE_GPT_API_VERSION", "")
+    AZURE_SEARCH_CLIENT_ID: str = os.getenv("AZURE_SEARCH_CLIENT_ID", "")
+    AZURE_SEARCH_CLIENT_SECRET: str = os.getenv("AZURE_SEARCH_CLIENT_SECRET", "")
+    
+    # JWT Token validation settings
+    JWT_AUDIENCE: str = os.getenv("AUDIENCE", "")
+    JWT_ISSUER: str = os.getenv("ISSUER", "")
+    JWT_ALGORITHMS: List[str] = ["RS256"]  # As seen in screenshot
+
     model_config = SettingsConfigDict(
         case_sensitive=True, env_file=".env", extra="ignore"
     )

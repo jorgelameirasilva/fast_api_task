@@ -1,12 +1,41 @@
 import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from unittest.mock import patch, Mock
+
+from app.auth.models import AuthUser
 
 
 class TestChatEndpoints:
     """Integration tests for chat API endpoints"""
 
-    def test_chat_endpoint_basic_conversation(self, client):
+    def test_chat_endpoint_basic_conversation(self, authenticated_client, auth_headers):
         """Test basic chat conversation functionality using approaches"""
+        # Arrange
+        chat_request = {
+            "messages": [{"role": "user", "content": "Hello, how are you?"}]
+        }
+
+        # Act
+        response = authenticated_client.post(
+            "/chat", json=chat_request, headers=auth_headers
+        )
+
+        # Assert
+        assert response.status_code == 200
+        data = response.json()
+        assert "choices" in data
+        assert len(data["choices"]) > 0
+
+        choice = data["choices"][0]
+        assert "message" in choice
+        assert choice["message"]["role"] == "assistant"
+
+        # Should always use approach-based responses now
+        assert "Chat-Read-Retrieve-Read approach" in choice["message"]["content"]
+
+    def test_chat_endpoint_unauthorized(self, client):
+        """Test chat endpoint without authentication"""
         # Arrange
         chat_request = {
             "messages": [{"role": "user", "content": "Hello, how are you?"}]
@@ -16,26 +45,31 @@ class TestChatEndpoints:
         response = client.post("/chat", json=chat_request)
 
         # Assert
-        assert response.status_code == 200
-        data = response.json()
-        assert "message" in data
-        assert data["message"]["role"] == "assistant"
+        assert response.status_code == 401
+        assert "Authorization header required" in response.json()["detail"]
 
-        # Should always use approach-based responses now
-        assert "Chat-Read-Retrieve-Read approach" in data["message"]["content"]
+    def test_chat_endpoint_invalid_token(self, client):
+        """Test chat endpoint with invalid token"""
+        # Arrange
+        chat_request = {
+            "messages": [{"role": "user", "content": "Hello, how are you?"}]
+        }
+        invalid_headers = {"Authorization": "Bearer invalid-token"}
 
-        # Validate approach integration
-        assert "context" in data
-        assert data["context"]["streaming"] is False
-        assert data["context"]["approach_used"] == "chat_read_retrieve_read"
-        assert data["context"]["approach_type"] == "ChatReadRetrieveReadApproach"
+        # Act
+        with patch("app.auth.dependencies.get_jwt_authenticator") as mock_auth:
+            mock_authenticator = Mock()
+            mock_authenticator.validate_and_extract_user.side_effect = HTTPException(
+                status_code=401, detail="Invalid token"
+            )
+            mock_auth.return_value = mock_authenticator
 
-        # Validate approach-specific context
-        assert "data_points" in data["context"]
-        assert "thoughts" in data["context"]
-        assert "followup_questions" in data["context"]
+            response = client.post("/chat", json=chat_request, headers=invalid_headers)
 
-    def test_chat_endpoint_with_session_state(self, client):
+        # Assert
+        assert response.status_code == 401
+
+    def test_chat_endpoint_with_session_state(self, authenticated_client, auth_headers):
         """Test chat endpoint maintains session state with approaches"""
         # Arrange
         chat_request = {

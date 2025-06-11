@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime
 
 from app.services.chat_service import ChatService
-from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
+from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage, ChatContext
+from app.auth.models import AuthUser
 
 
 class TestChatService:
@@ -14,6 +15,7 @@ class TestChatService:
         """Test successful chat processing"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
 
         with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
@@ -44,23 +46,27 @@ class TestChatService:
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(sample_chat_request)
+            response = await chat_service.process_chat(
+                request=sample_chat_request, current_user=test_user
+            )
 
             # Assert
             assert isinstance(response, ChatResponse)
-            assert response.message.role == "assistant"
-            assert "conversation context" in response.message.content
-            assert response.context["approach_used"] == "chat_read_retrieve_read"
-            assert response.context["approach_type"] == "ChatReadRetrieveReadApproach"
-            assert "data_points" in response.context
-            assert "thoughts" in response.context
-            assert "followup_questions" in response.context
+            assert len(response.choices) > 0
+            choice = response.choices[0]
+            assert choice.message.role == "assistant"
+            assert "conversation context" in choice.message.content
+            # Context is now in the choice content
+            assert choice.content is not None
+            assert len(choice.content.data_points) > 0
+            assert choice.content.thoughts is not None
 
     @pytest.mark.asyncio
     async def test_process_chat_with_session_state(self, sample_chat_request):
         """Test chat processing with session state"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
         sample_chat_request.session_state = "test-session-123"
 
         with patch("app.core.setup.get_chat_approach") as mock_get_approach:
@@ -85,18 +91,22 @@ class TestChatService:
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(sample_chat_request)
+            response = await chat_service.process_chat(
+                request=sample_chat_request, current_user=test_user
+            )
 
             # Assert
             assert response.session_state == "test-session-123"
-            assert response.context["session_updated"] is True
-            assert response.context["approach_used"] == "chat_read_retrieve_read"
+            # Context is now a ChatContext object, not a dict
+            assert response.context is not None
+            assert isinstance(response.context, ChatContext)
 
     @pytest.mark.asyncio
     async def test_process_chat_streaming(self, sample_chat_request):
         """Test chat processing with streaming"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
 
         with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_approach = Mock()
@@ -120,46 +130,59 @@ class TestChatService:
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(sample_chat_request, stream=True)
+            response = await chat_service.process_chat(
+                request=sample_chat_request, stream=True, current_user=test_user
+            )
 
             # Assert
-            assert response.context["streaming"] is True
-            assert response.context["approach_used"] == "chat_read_retrieve_read"
-            assert "Streaming chat response" in response.message.content
+            assert response.context is not None
+            assert len(response.choices) > 0
+            choice = response.choices[0]
+            # For streaming, we should have delta instead of message
+            assert choice.delta is not None
+            assert "Streaming chat response" in choice.delta.content
 
     @pytest.mark.asyncio
     async def test_process_chat_approach_failure(self, sample_chat_request):
         """Test chat processing when approach fails"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
 
         with patch("app.core.setup.get_chat_approach") as mock_get_approach:
             mock_get_approach.side_effect = Exception("Approach failed")
 
             # Act
-            response = await chat_service.process_chat(sample_chat_request)
+            response = await chat_service.process_chat(
+                request=sample_chat_request, current_user=test_user
+            )
 
             # Assert
-            assert response.context["approach_used"] == "simple_fallback"
-            assert response.context["fallback_reason"] == "approach_processing_failed"
-            assert "Thank you for your message" in response.message.content
+            # When approach fails, it falls back to simple processing
+            assert response.context is not None
+            assert len(response.choices) > 0
+            choice = response.choices[0]
+            assert choice.message is not None
+            assert "Thank you for your message" in choice.message.content
 
     @pytest.mark.asyncio
     async def test_process_chat_empty_messages(self):
         """Test chat processing with empty messages"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
         request = ChatRequest(messages=[])
 
         # Act & Assert
         with pytest.raises(ValueError, match="No user message found"):
-            await chat_service.process_chat(request)
+            await chat_service.process_chat(request=request, current_user=test_user)
 
     @pytest.mark.asyncio
     async def test_process_chat_no_user_messages(self):
         """Test chat processing with no user messages"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
         request = ChatRequest(
             messages=[
                 ChatMessage(role="assistant", content="Hello"),
@@ -169,13 +192,14 @@ class TestChatService:
 
         # Act & Assert
         with pytest.raises(ValueError, match="No user message found"):
-            await chat_service.process_chat(request)
+            await chat_service.process_chat(request=request, current_user=test_user)
 
     @pytest.mark.asyncio
     async def test_multi_turn_conversation(self):
         """Test processing multi-turn conversation"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
         messages = [
             ChatMessage(role="user", content="What is AI?"),
             ChatMessage(role="assistant", content="AI is artificial intelligence..."),
@@ -207,21 +231,32 @@ class TestChatService:
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(request)
+            response = await chat_service.process_chat(
+                request=request, current_user=test_user
+            )
 
             # Assert
             assert isinstance(response, ChatResponse)
-            assert response.context["approach_used"] == "chat_read_retrieve_read"
-            assert "machine learning" in response.message.content.lower()
+            assert len(response.choices) > 0
+            choice = response.choices[0]
+            assert choice.message is not None
+            assert "machine learning" in choice.message.content.lower()
 
     @pytest.mark.asyncio
     async def test_process_chat_with_context(self):
         """Test chat processing with additional context"""
         # Arrange
         chat_service = ChatService()
+        test_user = AuthUser(sub="test-user-123", email="test@example.com")
+
+        # Create proper ChatContext with overrides
+        from app.schemas.chat import ChatContext, Overrides
+
+        context = ChatContext(overrides=Overrides(selected_category="test", top=5))
+
         request = ChatRequest(
             messages=[ChatMessage(role="user", content="Hello")],
-            context={"user_preferences": {"language": "en"}},
+            context=context,
         )
 
         with patch("app.core.setup.get_chat_approach") as mock_get_approach:
@@ -246,8 +281,13 @@ class TestChatService:
             mock_get_approach.return_value = mock_approach
 
             # Act
-            response = await chat_service.process_chat(request)
+            response = await chat_service.process_chat(
+                request=request, current_user=test_user
+            )
 
             # Assert
-            assert response.context["approach_used"] == "chat_read_retrieve_read"
-            assert "Hello" in response.message.content
+            assert response.context is not None
+            assert len(response.choices) > 0
+            choice = response.choices[0]
+            assert choice.message is not None
+            assert "Hello" in choice.message.content
