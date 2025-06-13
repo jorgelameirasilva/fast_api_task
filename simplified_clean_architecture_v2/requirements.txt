@@ -1,0 +1,43 @@
+# Core FastAPI dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# Authentication
+PyJWT==2.8.0
+python-jose[cryptography]==3.3.0
+
+# HTTP client for external APIs
+aiohttp==3.9.1
+httpx==0.25.2
+
+# Logging
+loguru==0.7.2
+
+# Environment management
+python-dotenv==1.0.0
+
+# Data validation and serialization
+pydantic-settings==2.1.0
+
+# Development dependencies (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+
+# Testing HTTP
+httpx==0.25.2
+
+# Optional: Database drivers (uncomment if needed)
+# asyncpg==0.29.0  # PostgreSQL
+# aiomysql==0.2.0  # MySQL
+# motor==3.3.2     # MongoDB
+
+# Optional: Vector databases (uncomment if needed)
+# pinecone-client==2.2.4
+# weaviate-client==3.25.3
+# chromadb==0.4.17
+
+# Optional: Redis for caching (uncomment if needed)
+# redis==5.0.1
+# aioredis==2.0.1 
