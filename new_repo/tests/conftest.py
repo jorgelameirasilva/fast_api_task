@@ -35,11 +35,12 @@ async def async_client(test_app):
 
 @pytest.fixture
 def sample_chat_request():
-    """Sample chat request for testing"""
+    """Sample chat request for testing with new ChatRequest format"""
     return {
         "messages": [{"role": "user", "content": "How do I report an illness?"}],
         "context": {},
         "stream": False,
+        "session_state": None,  # New session
     }
 
 

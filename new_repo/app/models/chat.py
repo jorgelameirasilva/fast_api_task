@@ -1,44 +1,70 @@
 """Pydantic models for chat API"""
 
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
-    """Individual chat message"""
+    """Schema for a single chat message"""
 
     role: str = Field(
-        ..., description="Role of the message sender (user/assistant/system)"
+        ..., description="Role of the message sender (user, assistant, system)"
     )
     content: str = Field(..., description="Content of the message")
+    timestamp: Optional[datetime] = Field(None, description="Timestamp of the message")
 
 
-class ChatRequest(BaseModel):
-    """Chat request model"""
+class Overrides(BaseModel):
+    """Schema for context overrides"""
 
-    messages: List[ChatMessage] = Field(..., description="List of chat messages")
-    context: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional context"
+    selected_category: Optional[str] = Field(
+        None, description="Selected category for filtering"
     )
-    session_state: Optional[Dict[str, Any]] = Field(
-        default=None, description="Session state"
+    top: Optional[int] = Field(3, description="Number of top results to retrieve")
+    retrieval_mode: Optional[str] = Field(
+        "hybrid", description="Retrieval mode (hybrid, vector, etc.)"
     )
-    stream: bool = Field(default=False, description="Whether to stream the response")
+    semantic_ranker: Optional[bool] = Field(
+        True, description="Whether to use semantic ranker"
+    )
+    semantic_captions: Optional[bool] = Field(
+        False, description="Whether to use semantic captions"
+    )
+    suggest_followup_questions: Optional[bool] = Field(
+        True, description="Whether to suggest followup questions"
+    )
+    use_oid_security_filter: Optional[bool] = Field(
+        False, description="Whether to use OID security filter"
+    )
+    use_groups_security_filter: Optional[bool] = Field(
+        False, description="Whether to use groups security filter"
+    )
 
 
 class ChatContext(BaseModel):
-    """Chat context with overrides"""
+    """Schema for chat context"""
 
-    overrides: Optional[Dict[str, Any]] = Field(
+    overrides: Optional[Overrides] = Field(
+        None, description="Override settings for the chat"
+    )
+
+
+class ChatRequest(BaseModel):
+    """Schema for chat requests"""
+
+    messages: List[ChatMessage] = Field(..., description="List of chat messages")
+    stream: Optional[bool] = Field(False, description="Whether to stream the response")
+    context: Optional[ChatContext] = Field(
         None, description="Chat context with overrides"
     )
-    session_state: Optional[str] = Field(None, description="Session state")
+    session_state: Optional[str] = Field(None, description="Session state identifier")
 
 
 class ChatDelta(BaseModel):
     """Schema for chat response delta"""
 
-    role: Optional[str] = Field(None, description="Role of the message")
+    role: Optional[str] = Field(None, description="Role of the message sender")
     content: Optional[str] = Field(None, description="Content delta")
 
 
@@ -66,10 +92,8 @@ class ChatChoice(BaseModel):
     function_call: Optional[Dict[str, Any]] = Field(
         None, description="Function call information"
     )
-    tool_calls: Optional[List[Dict[str, Any]]] = Field(
-        None, description="Tool calls information"
-    )
-    finish_reason: Optional[str] = Field(None, description="Reason for completion")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Tool calls")
+    finish_reason: Optional[str] = Field(None, description="Reason for finishing")
 
 
 class ChatResponse(BaseModel):
@@ -77,14 +101,4 @@ class ChatResponse(BaseModel):
 
     choices: List[ChatChoice] = Field(..., description="List of response choices")
     session_state: Optional[str] = Field(None, description="Updated session state")
-    context: Optional[ChatContext] = Field(None, description="Updated chat context")
-
-
-class StreamingChatResponse(BaseModel):
-    """Streaming chat response chunk"""
-
-    choices: List[Dict[str, Any]] = Field(..., description="Response choices")
-    created: Optional[int] = Field(default=None, description="Creation timestamp")
-    id: Optional[str] = Field(default=None, description="Response ID")
-    model: Optional[str] = Field(default=None, description="Model used")
-    object: Optional[str] = Field(default=None, description="Object type")
+    context: Optional[ChatContext] = Field(None, description="Updated context")

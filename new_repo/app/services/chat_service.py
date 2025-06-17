@@ -248,6 +248,7 @@ class ChatService:
 
             return ChatResponse(
                 choices=[choice],
+                session_id=str(session_state) if session_state else None,
                 session_state=str(session_state) if session_state else None,
                 context=context,
             )

@@ -7,14 +7,16 @@ from pydantic import ValidationError
 
 from app.models.vote import VoteRequest, VoteResponse
 from app.services.vote_service import VoteService
+from app.orchestrators.vote_orchestrator import VoteOrchestrator
 from app.api.dependencies.auth import RequireAuth
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Global service instance
+# Global service and orchestrator instances
 vote_service = VoteService()
+vote_orchestrator = VoteOrchestrator(vote_service)
 
 
 @router.post("/vote", response_model=VoteResponse, status_code=200)
@@ -23,15 +25,16 @@ async def vote(
     auth_claims: Dict[str, Any] = RequireAuth,
 ) -> VoteResponse:
     """
-    Vote endpoint - replicates the exact behavior of the original /vote route
+    Vote endpoint following SOLID principles
 
-    Requires Bearer token authentication
+    Uses VoteOrchestrator to coordinate the complete vote workflow.
+    Requires Bearer token authentication.
     """
     try:
         logger.info("Vote request received")
 
-        # Process vote request using service
-        result = await vote_service.process_vote(request)
+        # Process vote request using orchestrator
+        result = await vote_orchestrator.process_vote_request(request, auth_claims)
 
         logger.info("Vote processed successfully")
         return result
