@@ -6,6 +6,90 @@ The **simplest possible clean architecture** for a FastAPI AI Chat API. This app
 
 This is the **ultimate simplified version** with only 4 layers:
 
+## 🔄 Complete Request Flow
+
+Here's the detailed flow from client request to response:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as "FastAPI Router"
+    participant Auth as "Auth Dependencies"
+    participant ChatService as "Chat Service<br/>(Coordination + Business Logic)"
+    participant VoteService as "Vote Service<br/>(Coordination + Business Logic)"
+    participant LLMRepo as "LLM Repository"
+    participant SearchRepo as "Search Repository"
+    participant OpenAI as "OpenAI API"
+
+    Client->>FastAPI: POST /chat/send
+    FastAPI->>Auth: get_current_user()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>ChatService: send_message(request, user)
+    
+    Note over ChatService: Internal Coordination + Business Logic
+    ChatService->>ChatService: _validate_message(content)
+    ChatService->>ChatService: _get_or_create_session(session_id, user_id)
+    ChatService->>ChatService: _should_use_search_context(message, session)
+    
+    alt Use Search Context
+        ChatService->>ChatService: _create_search_query_from_conversation(session, message)
+        ChatService->>SearchRepo: semantic_search(query)
+        SearchRepo-->>ChatService: SearchResults
+        ChatService->>ChatService: _process_search_results(results)
+    end
+    
+    ChatService->>ChatService: _prepare_llm_messages(session, message, context)
+    ChatService->>LLMRepo: generate_response(messages, temperature)
+    LLMRepo->>OpenAI: chat.completions.create()
+    OpenAI-->>LLMRepo: Response
+    LLMRepo-->>ChatService: LLMResponse
+    
+    ChatService->>ChatService: _create_message(content, role, user_id, session_id)
+    ChatService->>ChatService: _update_session_with_messages(session, messages)
+    
+    ChatService-->>FastAPI: ChatResponse
+    FastAPI-->>Client: JSON Response
+    
+    Note over Client,OpenAI: Vote Flow (Simplified)
+    Client->>FastAPI: POST /vote/submit
+    FastAPI->>Auth: get_current_user()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>VoteService: submit_vote(request, user)
+    
+    Note over VoteService: Internal Coordination + Business Logic
+    VoteService->>VoteService: _validate_vote(vote_type, feedback)
+    VoteService->>VoteService: _check_can_user_vote(user_id, message_id)
+    VoteService->>VoteService: _create_vote(vote_data)
+    
+    VoteService-->>FastAPI: VoteResponse
+    FastAPI-->>Client: JSON Response
+    
+    Note over Client,OpenAI: Streaming Chat Flow
+    Client->>FastAPI: POST /chat/stream
+    FastAPI->>Auth: get_current_user()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>ChatService: send_message_stream(request, user)
+    
+    loop Streaming Response
+        ChatService->>ChatService: _validate_message(content)
+        ChatService->>ChatService: _get_or_create_session(session_id, user_id)
+        ChatService->>LLMRepo: generate_streaming_response(messages)
+        LLMRepo->>OpenAI: chat.completions.create(stream=True)
+        OpenAI-->>LLMRepo: Stream Chunk
+        LLMRepo-->>ChatService: Chunk
+        ChatService-->>FastAPI: Stream Event
+        FastAPI-->>Client: Server-Sent Event
+    end
+```
+
+**Flow Characteristics:**
+- **5 components** involved in the flow (minimal complexity)
+- **Single service** handles both coordination AND business logic
+- **Internal method calls** (shown as self-calls) for business rules
+- **Minimal external dependencies** and abstractions
+- **Streaming support** integrated in the same service
+- **Ultimate simplicity** while maintaining clean separation
+
 ```
 ┌─────────────────────────────────────────┐
 │             API Layer                   │

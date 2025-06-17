@@ -6,6 +6,83 @@ This is a complete mockup implementation of Clean Architecture principles applie
 
 This implementation follows **Clean Architecture** with **Dependency Injection**, organized into four distinct layers:
 
+## 🔄 Complete Request Flow
+
+Here's the detailed flow from client request to response:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as "FastAPI Router"
+    participant Auth as "Auth Dependencies"
+    participant Orchestrator as "Ask Orchestrator"
+    participant AppService as "Ask Application Service"
+    participant DomainService as "Ask Domain Service"
+    participant SessionService as "Session Domain Service"
+    participant Container as "DI Container"
+    participant LLMApproach as "LLM Approach"
+    participant SearchApproach as "Search Approach"
+    participant LLMRepo as "LLM Repository"
+    participant SearchRepo as "Search Repository"
+    participant OpenAI as "OpenAI API"
+
+    Client->>FastAPI: POST /ask
+    FastAPI->>Auth: validate_token()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>Container: get_ask_orchestrator()
+    Container-->>FastAPI: AskOrchestrator
+    FastAPI->>Orchestrator: process_ask_request(request, user)
+    
+    Orchestrator->>Container: get_ask_application_service()
+    Container-->>Orchestrator: AskApplicationService
+    Orchestrator->>AppService: handle_ask_request(request, user)
+    
+    AppService->>Container: get_ask_domain_service()
+    Container-->>AppService: AskDomainService
+    AppService->>DomainService: process_ask(request, user)
+    
+    DomainService->>Container: get_session_domain_service()
+    Container-->>DomainService: SessionDomainService
+    DomainService->>SessionService: get_or_create_session(user_id, session_id)
+    SessionService-->>DomainService: Session
+    
+    DomainService->>Container: get_llm_approach()
+    Container-->>DomainService: LLMApproach
+    DomainService->>LLMApproach: should_use_search_context(message)
+    LLMApproach-->>DomainService: boolean
+    
+    alt Use Search Context
+        DomainService->>Container: get_search_approach()
+        Container-->>DomainService: SearchApproach
+        DomainService->>SearchApproach: get_relevant_context(query)
+        SearchApproach->>SearchRepo: semantic_search(query)
+        SearchRepo-->>SearchApproach: SearchResults
+        SearchApproach-->>DomainService: Context
+    end
+    
+    DomainService->>LLMApproach: generate_response(messages, context)
+    LLMApproach->>LLMRepo: generate_response(messages)
+    LLMRepo->>OpenAI: chat.completions.create()
+    OpenAI-->>LLMRepo: Response
+    LLMRepo-->>LLMApproach: LLMResponse
+    LLMApproach-->>DomainService: ProcessedResponse
+    
+    DomainService->>SessionService: update_session(session, messages)
+    SessionService-->>DomainService: Updated Session
+    
+    DomainService-->>AppService: AskResult
+    AppService-->>Orchestrator: AskResponse
+    Orchestrator-->>FastAPI: Response
+    FastAPI-->>Client: JSON Response
+```
+
+**Flow Characteristics:**
+- **12+ components** involved in a single request
+- **Heavy dependency injection** with container lookups at each step
+- **Multiple service layers** (Orchestrator → Application → Domain)
+- **Complex coordination** between 6+ architectural layers
+- **Enterprise-grade** but high complexity
+
 ### 1. **Presentation Layer** (`app/api/`)
 - FastAPI routers and endpoints
 - Request/response models (DTOs)

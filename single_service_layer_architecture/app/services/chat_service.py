@@ -16,6 +16,11 @@ from app.repositories.search_repository import (
     SearchResult,
     SearchQuery,
 )
+from app.repositories.cosmos_repository import (
+    CosmosRepository,
+    CosmosMessage,
+    CosmosSession,
+)
 
 
 @dataclass
@@ -79,6 +84,7 @@ class ChatService:
         # Initialize repositories
         self.llm_repository = LLMRepository()
         self.search_repository = SearchRepository()
+        self.cosmos_repository = CosmosRepository()
 
         # Business logic configuration
         self.max_messages_in_context = 10
@@ -87,8 +93,50 @@ class ChatService:
         self.max_session_duration_hours = 24
         self.max_sessions_per_user = 50
 
-        # In-memory storage (replace with actual database in production)
+        # In-memory storage fallback (when Cosmos DB not available)
         self.sessions: Dict[str, ChatSession] = {}
+        self.cosmos_connected = False
+
+    async def initialize(self):
+        """Initialize the service and connect to Cosmos DB"""
+        self.cosmos_connected = await self.cosmos_repository.connect()
+        if self.cosmos_connected:
+            logger.info("ChatService initialized with Cosmos DB")
+        else:
+            logger.warning(
+                "ChatService initialized with in-memory storage (Cosmos DB unavailable)"
+            )
+
+    async def _load_session_messages(
+        self, session_id: str, user_id: str
+    ) -> List[ChatMessage]:
+        """Load recent messages for a session from Cosmos DB"""
+
+        if not self.cosmos_connected:
+            return []
+
+        cosmos_messages = await self.cosmos_repository.get_session_messages(
+            session_id=session_id,
+            user_id=user_id,
+            limit=self.max_messages_in_context * 2,
+        )
+
+        # Convert to ChatMessage objects
+        messages = []
+        for msg in cosmos_messages:
+            messages.append(
+                ChatMessage(
+                    id=msg.id,
+                    content=msg.content,
+                    role=msg.role,
+                    timestamp=datetime.fromisoformat(msg.timestamp),
+                    user_id=msg.user_id,
+                    session_id=msg.session_id,
+                    metadata=msg.metadata,
+                )
+            )
+
+        return messages
 
     # =============================================================================
     # PUBLIC API METHODS (called by endpoints)
@@ -152,7 +200,9 @@ class ChatService:
             )
 
             # Update session (business logic)
-            self._update_session_with_messages(session, user_message, assistant_message)
+            await self._update_session_with_messages(
+                session, user_message, assistant_message
+            )
 
             return ChatResponse(
                 message=llm_response.content,
@@ -244,7 +294,9 @@ class ChatService:
             )
 
             # Update session (business logic)
-            self._update_session_with_messages(session, user_message, assistant_message)
+            await self._update_session_with_messages(
+                session, user_message, assistant_message
+            )
 
             # Send completion
             yield {
@@ -260,21 +312,43 @@ class ChatService:
     async def get_session_history(self, session_id: str, user: AuthUser) -> Dict:
         """Get chat session history"""
 
-        session = self.sessions.get(session_id)
-        if not session:
-            raise ValueError("Session not found")
+        if self.cosmos_connected:
+            # Get session from Cosmos DB
+            cosmos_session = await self.cosmos_repository.get_session(
+                session_id, user.user_id
+            )
+            if not cosmos_session:
+                raise ValueError("Session not found")
 
-        # Check access (business logic)
-        if session.user_id != user.user_id:
-            raise PermissionError("User can only access their own sessions")
+            # Load messages from Cosmos DB
+            messages = await self._load_session_messages(session_id, user.user_id)
+
+            # Create session object for summary
+            session = ChatSession(
+                session_id=cosmos_session.id,
+                user_id=cosmos_session.user_id,
+                messages=messages,
+                created_at=datetime.fromisoformat(cosmos_session.created_at),
+                updated_at=datetime.fromisoformat(cosmos_session.updated_at),
+                context=cosmos_session.context,
+            )
+        else:
+            # Fallback to in-memory storage
+            session = self.sessions.get(session_id)
+            if not session:
+                raise ValueError("Session not found")
+
+            # Check access (business logic)
+            if session.user_id != user.user_id:
+                raise PermissionError("User can only access their own sessions")
 
         # Get session summary (business logic)
         summary = self._get_session_summary(session)
 
         # Format messages (coordination)
-        messages = []
+        formatted_messages = []
         for msg in session.messages:
-            messages.append(
+            formatted_messages.append(
                 {
                     "id": msg.id,
                     "content": msg.content,
@@ -283,7 +357,7 @@ class ChatService:
                 }
             )
 
-        return {"session": summary, "messages": messages}
+        return {"session": summary, "messages": formatted_messages}
 
     async def get_user_sessions(self, user: AuthUser) -> List[Dict]:
         """Get all sessions for a user"""
@@ -544,7 +618,7 @@ Use this information to provide accurate and contextual responses. If the provid
             session_id=session_id,
         )
 
-    def _update_session_with_messages(
+    async def _update_session_with_messages(
         self,
         session: ChatSession,
         user_message: ChatMessage,
@@ -552,43 +626,123 @@ Use this information to provide accurate and contextual responses. If the provid
     ) -> None:
         """Update session with new messages (business logic)"""
 
-        # Add messages to session
-        session.messages.extend([user_message, assistant_message])
-        session.updated_at = datetime.utcnow()
+        # Save messages to database
+        if self.cosmos_connected:
+            # Save messages to Cosmos DB
+            await self.cosmos_repository.save_message(
+                message_id=user_message.id,
+                content=user_message.content,
+                role=user_message.role,
+                user_id=user_message.user_id,
+                session_id=user_message.session_id,
+                timestamp=user_message.timestamp,
+                metadata=user_message.metadata,
+            )
 
-        # Trim old messages if session gets too long
-        if len(session.messages) > self.max_messages_in_context * 2:
-            # Keep recent messages
-            session.messages = session.messages[-(self.max_messages_in_context * 2) :]
+            await self.cosmos_repository.save_message(
+                message_id=assistant_message.id,
+                content=assistant_message.content,
+                role=assistant_message.role,
+                user_id=assistant_message.user_id,
+                session_id=assistant_message.session_id,
+                timestamp=assistant_message.timestamp,
+                metadata=assistant_message.metadata,
+            )
 
-        # Store updated session
-        self.sessions[session.session_id] = session
+            # Update session metadata
+            session_title = self._generate_session_title(
+                session.messages + [user_message, assistant_message]
+            )
+            await self.cosmos_repository.update_session(
+                session_id=session.session_id,
+                user_id=session.user_id,
+                title=session_title,
+                message_count=len(session.messages) + 2,
+            )
+        else:
+            # Fallback to in-memory storage
+            session.messages.extend([user_message, assistant_message])
+            session.updated_at = datetime.utcnow()
+
+            # Trim old messages if session gets too long
+            if len(session.messages) > self.max_messages_in_context * 2:
+                # Keep recent messages
+                session.messages = session.messages[
+                    -(self.max_messages_in_context * 2) :
+                ]
+
+            # Store updated session
+            self.sessions[session.session_id] = session
 
     async def _get_or_create_session(
         self, session_id: Optional[str], user_id: str
     ) -> ChatSession:
         """Get existing session or create new one (coordination + business logic)"""
 
-        if session_id and session_id in self.sessions:
-            session = self.sessions[session_id]
+        if self.cosmos_connected:
+            # Use Cosmos DB
+            if session_id:
+                # Try to get existing session
+                cosmos_session = await self.cosmos_repository.get_session(
+                    session_id, user_id
+                )
+                if cosmos_session:
+                    # Convert to ChatSession and load recent messages
+                    messages = await self._load_session_messages(session_id, user_id)
+                    session = ChatSession(
+                        session_id=cosmos_session.id,
+                        user_id=cosmos_session.user_id,
+                        messages=messages,
+                        created_at=datetime.fromisoformat(cosmos_session.created_at),
+                        updated_at=datetime.fromisoformat(cosmos_session.updated_at),
+                        context=cosmos_session.context,
+                    )
 
-            # Validate session (business logic)
-            if not self._is_session_valid(session):
-                logger.warning(f"Invalid session {session_id}, creating new one")
-                # Create new session
-                new_session = self._create_new_session(user_id)
-                self.sessions[new_session.session_id] = new_session
-                return new_session
+                    # Validate session (business logic)
+                    if self._is_session_valid(session):
+                        return session
+                    else:
+                        logger.warning(
+                            f"Invalid session {session_id}, creating new one"
+                        )
 
-            return session
-        else:
             # Create new session
             new_session = self._create_new_session(user_id, session_id)
-            self.sessions[new_session.session_id] = new_session
+
+            # Save to Cosmos DB
+            await self.cosmos_repository.create_session(
+                session_id=new_session.session_id,
+                user_id=new_session.user_id,
+                context=new_session.context,
+                title=None,
+            )
+
             logger.info(
                 f"Created new session {new_session.session_id} for user {user_id}"
             )
             return new_session
+        else:
+            # Fallback to in-memory storage
+            if session_id and session_id in self.sessions:
+                session = self.sessions[session_id]
+
+                # Validate session (business logic)
+                if not self._is_session_valid(session):
+                    logger.warning(f"Invalid session {session_id}, creating new one")
+                    # Create new session
+                    new_session = self._create_new_session(user_id)
+                    self.sessions[new_session.session_id] = new_session
+                    return new_session
+
+                return session
+            else:
+                # Create new session
+                new_session = self._create_new_session(user_id, session_id)
+                self.sessions[new_session.session_id] = new_session
+                logger.info(
+                    f"Created new session {new_session.session_id} for user {user_id}"
+                )
+                return new_session
 
     def _create_new_session(
         self, user_id: str, session_id: Optional[str] = None

@@ -6,6 +6,77 @@ A FastAPI application implementing **simplified clean architecture** with **chat
 
 This project follows a **decoupled clean architecture** with clear separation of concerns:
 
+## 🔄 Complete Request Flow
+
+Here's the detailed flow from client request to response:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as "FastAPI Router"
+    participant Auth as "Auth Dependencies"
+    participant AppService as "Chat Application Service"
+    participant ChatDomain as "Chat Domain Service"
+    participant SessionDomain as "Session Domain Service"
+    participant VoteDomain as "Vote Domain Service"
+    participant LLMRepo as "LLM Repository"
+    participant SearchRepo as "Search Repository"
+    participant OpenAI as "OpenAI API"
+
+    Client->>FastAPI: POST /chat/send
+    FastAPI->>Auth: get_current_user()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>AppService: send_message(request, user)
+    
+    AppService->>ChatDomain: validate_message(content)
+    ChatDomain-->>AppService: validation_result
+    
+    AppService->>SessionDomain: get_or_create_session(user_id, session_id)
+    SessionDomain-->>AppService: Session
+    
+    AppService->>ChatDomain: should_use_search_context(message, session)
+    ChatDomain-->>AppService: boolean
+    
+    alt Use Search Context
+        AppService->>SearchRepo: semantic_search(query)
+        SearchRepo-->>AppService: SearchResults
+        AppService->>ChatDomain: process_search_results(results)
+        ChatDomain-->>AppService: Context
+    end
+    
+    AppService->>ChatDomain: prepare_llm_messages(session, message, context)
+    ChatDomain-->>AppService: LLMMessages
+    
+    AppService->>LLMRepo: generate_response(messages, temperature)
+    LLMRepo->>OpenAI: chat.completions.create()
+    OpenAI-->>LLMRepo: Response
+    LLMRepo-->>AppService: LLMResponse
+    
+    AppService->>ChatDomain: create_chat_message(content, role, user_id)
+    ChatDomain-->>AppService: ChatMessage
+    
+    AppService->>SessionDomain: update_session_with_messages(session, messages)
+    SessionDomain-->>AppService: Updated Session
+    
+    AppService-->>FastAPI: ChatResponse
+    FastAPI-->>Client: JSON Response
+    
+    Note over Client,OpenAI: Vote Flow (Parallel)
+    Client->>FastAPI: POST /vote/submit
+    FastAPI->>Auth: get_current_user()
+    Auth-->>FastAPI: AuthUser
+    FastAPI->>VoteDomain: submit_vote(request, user)
+    VoteDomain-->>FastAPI: VoteResponse
+    FastAPI-->>Client: JSON Response
+```
+
+**Flow Characteristics:**
+- **8 components** involved in main chat flow
+- **Clear separation** between Application (coordination) and Domain (business logic)
+- **Direct service instantiation** (no dependency injection container)
+- **Parallel vote flow** showing decoupled services
+- **Moderate complexity** with good separation of concerns
+
 ```
 ┌─────────────────────────────────────────┐
 │               API Layer                 │
