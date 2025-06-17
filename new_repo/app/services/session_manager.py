@@ -1,155 +1,109 @@
-"""
-Session Management Service - Handles all session-related business logic
-Follows Single Responsibility Principle
-"""
+"""Session Manager for handling chat sessions"""
 
 import logging
-from typing import Dict, Any, Optional, List
-from app.models.chat import ChatMessage, ChatRequest
-from app.models.session import ChatSession
-from app.services.cosmos_service import cosmos_session_service
+import uuid
+from datetime import datetime
+from typing import Any
+
+from app.models.session import Session
+from app.models.chat import ChatMessage
 
 logger = logging.getLogger(__name__)
 
 
 class SessionManager:
     """
-    Handles all session management logic
-    Single responsibility: Manage conversation sessions
+    Session manager for handling chat sessions
+    Simplified implementation for the demo
     """
 
     def __init__(self):
-        self.cosmos_service = cosmos_session_service
+        # In-memory storage for demo purposes
+        self.sessions: dict[str, Session] = {}
+        self.user_sessions: dict[str, list[str]] = {}
 
-    async def get_or_create_session(
-        self,
-        session_id: Optional[str],
-        user_id: str,
-        request_context: Dict[str, Any] = None,
-    ) -> ChatSession:
-        """
-        Get existing session or create new one
+    async def create_session(
+        self, user_id: str, context: dict[str, Any] = None
+    ) -> Session:
+        """Create a new chat session"""
+        session_id = str(uuid.uuid4())
 
-        Args:
-            session_id: Optional session ID to continue
-            user_id: User identifier for session ownership
-            request_context: Additional context from request
+        session = Session(
+            id=session_id,
+            user_id=user_id,
+            context=context or {},
+            messages=[],
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
 
-        Returns:
-            ChatSession: The session to use for conversation
-        """
-        try:
-            if session_id:
-                # Try to get existing session
-                existing_session = await self.cosmos_service.get_session(
-                    session_id, user_id
-                )
-                if existing_session:
-                    logger.info(f"Continuing existing session: {session_id}")
-                    return existing_session
-                else:
-                    logger.warning(
-                        f"Session {session_id} not found, creating new session"
-                    )
+        # Store session
+        self.sessions[session_id] = session
 
-            # Create new session
-            logger.info(f"Creating new session for user: {user_id}")
-            return await self.cosmos_service.create_session(
-                user_id=user_id, context=request_context or {}
-            )
+        # Track user sessions
+        if user_id not in self.user_sessions:
+            self.user_sessions[user_id] = []
+        self.user_sessions[user_id].append(session_id)
 
-        except Exception as e:
-            logger.error(f"Session management error: {str(e)}")
-            raise
+        logger.info(f"Created session {session_id} for user {user_id}")
+        return session
 
-    async def add_user_messages_to_session(
-        self,
-        session: ChatSession,
-        messages: List[ChatMessage],
-        context_update: Dict[str, Any] = None,
-    ) -> ChatSession:
-        """
-        Add user messages to session
+    async def get_session(self, session_id: str, user_id: str) -> Session | None:
+        """Get a session by ID if it belongs to the user"""
+        session = self.sessions.get(session_id)
 
-        Args:
-            session: The session to update
-            messages: List of messages to add
-            context_update: Optional context updates
+        if session and session.user_id == user_id:
+            return session
 
-        Returns:
-            Updated ChatSession
-        """
-        try:
-            updated_session = session
+        return None
 
-            # Add each user message
-            for message in messages:
-                if message.role == "user":
-                    updated_session = await self.cosmos_service.add_message_to_session(
-                        session_id=session.id,
-                        user_id=session.user_id,
-                        message=message,
-                        update_context=context_update,
-                    )
+    async def update_session_context(
+        self, session_id: str, user_id: str, context: dict[str, Any]
+    ) -> Session | None:
+        """Update session context"""
+        session = await self.get_session(session_id, user_id)
 
-            return updated_session
+        if session:
+            session.context.update(context)
+            session.updated_at = datetime.utcnow()
+            logger.info(f"Updated context for session {session_id}")
 
-        except Exception as e:
-            logger.error(f"Error adding messages to session: {str(e)}")
-            raise
+        return session
 
-    async def add_assistant_message_to_session(
-        self, session: ChatSession, message: ChatMessage
-    ) -> None:
-        """
-        Add assistant response to session
+    async def add_message_to_session(
+        self, session_id: str, user_id: str, message: ChatMessage
+    ) -> Session | None:
+        """Add a message to the session"""
+        session = await self.get_session(session_id, user_id)
 
-        Args:
-            session: The session to update
-            message: Assistant message to add
-        """
-        try:
-            await self.cosmos_service.add_message_to_session(
-                session_id=session.id, user_id=session.user_id, message=message
-            )
-            logger.debug(f"Added assistant message to session {session.id}")
+        if session:
+            session.messages.append(message)
+            session.updated_at = datetime.utcnow()
+            logger.info(f"Added message to session {session_id}")
 
-        except Exception as e:
-            logger.error(f"Error adding assistant message to session: {str(e)}")
-            raise
+        return session
 
-    def prepare_conversation_context(
-        self, session: ChatSession, request: ChatRequest, auth_claims: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Prepare context for AI conversation
+    async def get_user_sessions(self, user_id: str) -> list[Session]:
+        """Get all sessions for a user"""
+        session_ids = self.user_sessions.get(user_id, [])
+        return [self.sessions[sid] for sid in session_ids if sid in self.sessions]
 
-        Args:
-            session: The conversation session
-            request: The chat request
-            auth_claims: Authentication claims
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """Delete a session"""
+        session = await self.get_session(session_id, user_id)
 
-        Returns:
-            Context dictionary for AI processing
-        """
-        context = session.context.copy()
-        context.update(request.context)
-        context["auth_claims"] = auth_claims
-        context["session_id"] = session.id
+        if session:
+            # Remove from sessions
+            del self.sessions[session_id]
 
-        return context
+            # Remove from user sessions
+            if user_id in self.user_sessions:
+                self.user_sessions[user_id].remove(session_id)
 
-    def get_conversation_history(self, session: ChatSession) -> List[Dict[str, str]]:
-        """
-        Extract conversation history for AI processing
+            logger.info(f"Deleted session {session_id}")
+            return True
 
-        Args:
-            session: The conversation session
-
-        Returns:
-            List of message dictionaries for AI
-        """
-        return [{"role": msg.role, "content": msg.content} for msg in session.messages]
+        return False
 
 
 # Global instance

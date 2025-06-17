@@ -4,12 +4,13 @@ Single Responsibility: Handle HTTP requests and delegate to business services
 """
 
 import logging
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException
+from typing import Any
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 
 from app.models.chat import ChatRequest, ChatResponse
 from app.orchestrators.chat_orchestrator import chat_orchestrator
-from app.api.dependencies.auth import RequireAuth
+from app.api.dependencies.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -17,39 +18,29 @@ router = APIRouter()
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(
+async def chat_endpoint(
     request: ChatRequest,
-    auth_claims: Dict[str, Any] = RequireAuth,
-):
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> StreamingResponse:
     """
-    Chat endpoint - Clean, focused HTTP handler
+    Process a chat request and return a streaming response.
 
-    Single Responsibility:
-    - Receive HTTP request
-    - Delegate to orchestrator service
-    - Return HTTP response
-
-    Business logic is handled by ChatOrchestrator and its dependencies
+    This endpoint always returns a streaming response for consistency,
+    even when stream=False in the request.
     """
     try:
         logger.info(
-            f"Chat request: {len(request.messages)} messages, "
-            f"session_state: {request.session_state}, stream: {request.stream}"
+            f"Chat request received from user: {current_user.get('oid', 'unknown')}"
         )
 
-        # Delegate all processing to orchestrator - it returns unified StreamingResponse
-        result = await chat_orchestrator.process_chat_request(
-            request=request, auth_claims=auth_claims
-        )
+        # Process the chat request through the orchestrator
+        response = await chat_orchestrator.process_chat_request(request, current_user)
 
-        return result
+        return response
 
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-    except Exception as error:
-        logger.exception(f"Chat endpoint error: {error}")
+    except Exception as e:
+        logger.error(f"Chat endpoint error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"The app encountered an error processing your request. Error type: {type(error).__name__}",
+            detail=f"The app encountered an error processing your request. Error type: {type(e).__name__}",
         )

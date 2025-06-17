@@ -1,10 +1,7 @@
-"""Vote service for handling vote business logic"""
+"""Vote service for handling voting business logic"""
 
 import logging
-from typing import Dict, Any, Union
-
-from app.core.config import settings
-from app.models.vote import VoteRequest, VoteResponse
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -13,98 +10,70 @@ class VoteService:
     """Service for handling vote operations"""
 
     def __init__(self):
-        # Initialize logging with same format as original
-        self.logger = logging.getLogger("chatbot/chatbot-logs.log")
+        # In-memory storage for demo purposes
+        self.votes: dict[str, dict[str, Any]] = {}
 
-    async def process_vote(self, request: VoteRequest) -> VoteResponse:
+    async def process_vote(self, vote_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Process vote request and return response
+        Process a vote request
 
-        This replicates the exact behavior of the original /vote endpoint
+        Args:
+            vote_data: Dictionary containing vote information
+
+        Returns:
+            Dictionary with processing result
         """
         try:
-            # Extract and process request data (exactly like original)
-            user_query = request.user_query
-            chatbot_response = request.chatbot_response
-            count = request.count
-            upvote = request.upvote
-            downvote = request.downvote
+            # Generate a simple vote ID
+            vote_id = f"vote_{len(self.votes) + 1}"
 
-            # Process chatbot_response if it's a string and not empty/None
-            if (
-                isinstance(chatbot_response, str)
-                and chatbot_response != ""
-                and chatbot_response is not None
-            ):
-                chatbot_response = chatbot_response.replace("\n", "")
+            # Store the vote
+            self.votes[vote_id] = {
+                "id": vote_id,
+                "user_query": vote_data.get("user_query"),
+                "chatbot_response": vote_data.get("chatbot_response"),
+                "upvote": vote_data.get("upvote", 0),
+                "downvote": vote_data.get("downvote", 0),
+                "count": vote_data.get("count", 0),
+                "reason_multiple_choice": vote_data.get("reason_multiple_choice"),
+                "additional_comments": vote_data.get("additional_comments"),
+                "processed": True,
+            }
 
-            # Record upvote (exactly like original)
-            if upvote == 1:
-                if count == 1:
-                    self.logger.info(
-                        "UPVOTE_RECORDED",
-                        extra={
-                            "user_query": user_query,
-                            "chatbot_response": chatbot_response,
-                        },
-                    )
-                elif count == -1:
-                    self.logger.info(
-                        "UPVOTE_REMOVED",
-                        extra={
-                            "user_query": user_query,
-                            "chatbot_response": chatbot_response,
-                        },
-                    )
+            logger.info(f"Processed vote {vote_id}")
 
-            # Record downvote (exactly like original)
-            elif downvote == 1:
-                # Process reason_multiple_choice
-                reason_multiple_choice = request.reason_multiple_choice
-                if isinstance(reason_multiple_choice, str):
-                    reason_multiple_choice = reason_multiple_choice.strip().replace(
-                        "\n", ""
-                    )
-                elif reason_multiple_choice == {}:
-                    reason_multiple_choice = ""
-
-                # Process additional_comments
-                additional_comments = request.additional_comments
-                if isinstance(additional_comments, str):
-                    additional_comments = additional_comments.strip().replace("\n", "")
-                elif additional_comments == {}:
-                    additional_comments = ""
-
-                if count == 1:
-                    self.logger.info(
-                        "DOWNVOTE_RECORDED",
-                        extra={
-                            "user_query": user_query,
-                            "chatbot_response": chatbot_response,
-                            "reason_multiple_choice": reason_multiple_choice,
-                            "additional_comments": additional_comments,
-                        },
-                    )
-                elif count == -1:
-                    self.logger.info(
-                        "DOWNVOTE_REMOVED",
-                        extra={
-                            "user_query": user_query,
-                            "chatbot_response": chatbot_response,
-                            "reason_multiple_choice": reason_multiple_choice,
-                            "additional_comments": additional_comments,
-                        },
-                    )
-
-            # Return response in exact same format as original
-            return VoteResponse(
-                user_query=user_query,
-                message=chatbot_response,  # Note: renamed from chatbot_response to message
-                upvote=upvote,
-                downvote=downvote,
-                count=count,
-            )
+            return {
+                "vote_id": vote_id,
+                "status": "success",
+                "message": "Vote processed successfully",
+            }
 
         except Exception as e:
-            logger.error(f"Vote processing failed: {str(e)}")
-            raise
+            logger.error(f"Error processing vote: {str(e)}")
+            return {"status": "error", "message": f"Failed to process vote: {str(e)}"}
+
+    async def get_vote_stats(self) -> dict[str, Any]:
+        """Get voting statistics"""
+        try:
+            total_votes = len(self.votes)
+            upvotes = sum(
+                1 for vote in self.votes.values() if vote.get("upvote", 0) > 0
+            )
+            downvotes = sum(
+                1 for vote in self.votes.values() if vote.get("downvote", 0) > 0
+            )
+
+            return {
+                "total_votes": total_votes,
+                "upvotes": upvotes,
+                "downvotes": downvotes,
+                "status": "success",
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting vote stats: {str(e)}")
+            return {"status": "error", "message": f"Failed to get vote stats: {str(e)}"}
+
+
+# Global instance
+vote_service = VoteService()

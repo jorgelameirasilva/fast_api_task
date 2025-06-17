@@ -1,104 +1,88 @@
 """Pydantic models for chat API"""
 
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
-    """Schema for a single chat message"""
+    """Chat message model"""
 
-    role: str = Field(
-        ..., description="Role of the message sender (user, assistant, system)"
-    )
+    role: str = Field(..., description="Role of the message sender")
     content: str = Field(..., description="Content of the message")
-    timestamp: Optional[datetime] = Field(None, description="Timestamp of the message")
+    timestamp: datetime | None = Field(
+        default=None, description="Timestamp of the message"
+    )
+
+
+class ChatDelta(BaseModel):
+    """Chat delta for streaming responses"""
+
+    role: str | None = Field(default=None, description="Role of the message sender")
+    content: str | None = Field(default=None, description="Content delta")
+
+
+class ChatContentData(BaseModel):
+    """Additional content data for chat responses"""
+
+    data_points: list[str] = Field(default_factory=list, description="Data points used")
+    thoughts: str = Field(default="", description="Reasoning thoughts")
+
+
+class ChatChoice(BaseModel):
+    """Chat choice model"""
+
+    message: ChatMessage | None = Field(default=None, description="Complete message")
+    delta: ChatDelta | None = Field(default=None, description="Delta for streaming")
+    content: ChatContentData | None = Field(
+        default=None, description="Additional content data"
+    )
+    finish_reason: str | None = Field(default=None, description="Reason for finishing")
 
 
 class Overrides(BaseModel):
-    """Schema for context overrides"""
+    """Override settings for chat requests"""
 
-    selected_category: Optional[str] = Field(
-        None, description="Selected category for filtering"
+    selected_category: str | None = Field(default=None, description="Selected category")
+    top: int = Field(default=3, description="Number of top results")
+    retrieval_mode: str | None = Field(default=None, description="Retrieval mode")
+    semantic_ranker: bool = Field(default=True, description="Use semantic ranker")
+    semantic_captions: bool = Field(default=False, description="Use semantic captions")
+    suggest_followup_questions: bool = Field(
+        default=False, description="Suggest followup questions"
     )
-    top: Optional[int] = Field(3, description="Number of top results to retrieve")
-    retrieval_mode: Optional[str] = Field(
-        "hybrid", description="Retrieval mode (hybrid, vector, etc.)"
+    use_oid_security_filter: bool = Field(
+        default=False, description="Use OID security filter"
     )
-    semantic_ranker: Optional[bool] = Field(
-        True, description="Whether to use semantic ranker"
-    )
-    semantic_captions: Optional[bool] = Field(
-        False, description="Whether to use semantic captions"
-    )
-    suggest_followup_questions: Optional[bool] = Field(
-        True, description="Whether to suggest followup questions"
-    )
-    use_oid_security_filter: Optional[bool] = Field(
-        False, description="Whether to use OID security filter"
-    )
-    use_groups_security_filter: Optional[bool] = Field(
-        False, description="Whether to use groups security filter"
+    use_groups_security_filter: bool = Field(
+        default=False, description="Use groups security filter"
     )
 
 
 class ChatContext(BaseModel):
-    """Schema for chat context"""
+    """Chat context model"""
 
-    overrides: Optional[Overrides] = Field(
-        None, description="Override settings for the chat"
-    )
+    overrides: Overrides | None = Field(default=None, description="Override settings")
 
 
 class ChatRequest(BaseModel):
-    """Schema for chat requests"""
+    """Chat request model"""
 
-    messages: List[ChatMessage] = Field(..., description="List of chat messages")
-    stream: Optional[bool] = Field(False, description="Whether to stream the response")
-    context: Optional[ChatContext] = Field(
-        None, description="Chat context with overrides"
+    messages: list[ChatMessage] = Field(..., description="List of chat messages")
+    stream: bool = Field(default=False, description="Whether to stream the response")
+    context: dict[str, Any] = Field(
+        default_factory=dict, description="Additional context"
     )
-    session_state: Optional[str] = Field(None, description="Session state identifier")
-
-
-class ChatDelta(BaseModel):
-    """Schema for chat response delta"""
-
-    role: Optional[str] = Field(None, description="Role of the message sender")
-    content: Optional[str] = Field(None, description="Content delta")
-
-
-class ChatContentData(BaseModel):
-    """Schema for chat content data"""
-
-    data_points: Optional[List[str]] = Field(
-        None, description="Data points from retrieval"
+    session_state: str | None = Field(
+        default=None, description="Session state identifier"
     )
-    thoughts: Optional[str] = Field(None, description="Assistant thoughts")
-
-
-class ChatChoice(BaseModel):
-    """Schema for chat response choice"""
-
-    delta: Optional[ChatDelta] = Field(
-        None, description="Delta for streaming responses"
-    )
-    message: Optional[ChatMessage] = Field(
-        None, description="Complete message for non-streaming"
-    )
-    content: Optional[ChatContentData] = Field(
-        None, description="Structured content data"
-    )
-    function_call: Optional[Dict[str, Any]] = Field(
-        None, description="Function call information"
-    )
-    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Tool calls")
-    finish_reason: Optional[str] = Field(None, description="Reason for finishing")
 
 
 class ChatResponse(BaseModel):
-    """Schema for chat responses"""
+    """Chat response model"""
 
-    choices: List[ChatChoice] = Field(..., description="List of response choices")
-    session_state: Optional[str] = Field(None, description="Updated session state")
-    context: Optional[ChatContext] = Field(None, description="Updated context")
+    choices: list[ChatChoice] = Field(..., description="List of response choices")
+    session_state: str | None = Field(
+        default=None, description="Session state identifier"
+    )
+    context: ChatContext | None = Field(default=None, description="Response context")

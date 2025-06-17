@@ -18,7 +18,7 @@ from app.services.vote_service import VoteService
 from app.orchestrators.vote_orchestrator import VoteOrchestrator
 from app.orchestrators.chat_orchestrator import ChatOrchestrator
 from app.services.session_manager import SessionManager
-from app.services.streaming_service import StreamingService
+
 from app.services.chat_service import ChatService
 
 
@@ -47,14 +47,12 @@ class TestOrchestratorArchitecture:
 
         # Mock dependencies
         mock_vote_service = AsyncMock(spec=VoteService)
-        mock_response = VoteResponse(
-            user_query="Test query",
-            message="Test response",
-            upvote=1,
-            downvote=0,
-            count=1,
-        )
-        mock_vote_service.process_vote.return_value = mock_response
+        mock_service_response = {
+            "vote_id": "vote_1",
+            "status": "success",
+            "message": "Vote processed successfully",
+        }
+        mock_vote_service.process_vote.return_value = mock_service_response
 
         # Create orchestrator
         orchestrator = VoteOrchestrator(mock_vote_service)
@@ -72,32 +70,36 @@ class TestOrchestratorArchitecture:
         # Process vote
         result = await orchestrator.process_vote_request(request, auth_claims)
 
-        # Verify coordination
-        mock_vote_service.process_vote.assert_called_once_with(request)
-        assert result == mock_response
+        # Verify coordination - service should be called with vote data dict
+        expected_vote_data = {
+            "user_query": "Test query",
+            "chatbot_response": "Test response",
+            "upvote": 1,
+            "downvote": 0,
+            "count": 1,
+            "reason_multiple_choice": None,
+            "additional_comments": None,
+        }
+        mock_vote_service.process_vote.assert_called_once_with(expected_vote_data)
+
+        # Result should be a VoteResponse
+        assert isinstance(result, VoteResponse)
         assert result.upvote == 1
+        assert result.user_query == "Test query"
 
         print("✅ VoteOrchestrator properly coordinates vote workflow")
 
     def test_chat_orchestrator_new_location(self):
         """Test ChatOrchestrator in orchestrators folder"""
 
-        # Mock dependencies
-        mock_chat_service = Mock(spec=ChatService)
+        # Mock dependencies - simplified design
         mock_session_manager = Mock(spec=SessionManager)
-        mock_streaming_service = Mock(spec=StreamingService)
 
-        # Create orchestrator
-        orchestrator = ChatOrchestrator(
-            chat_service=mock_chat_service,
-            session_manager=mock_session_manager,
-            streaming_service=mock_streaming_service,
-        )
+        # Create orchestrator - simplified constructor
+        orchestrator = ChatOrchestrator(mock_session_manager)
 
         # Verify proper initialization
-        assert orchestrator.chat_service == mock_chat_service
         assert orchestrator.session_manager == mock_session_manager
-        assert orchestrator.streaming_service == mock_streaming_service
 
         print("✅ ChatOrchestrator properly located in orchestrators folder")
 
@@ -174,12 +176,9 @@ class TestOrchestratorArchitecture:
         vote_service = VoteService()
         vote_orchestrator = VoteOrchestrator(vote_service)
 
-        chat_service = ChatService()
+        # Simplified chat orchestrator
         session_manager = SessionManager()
-        streaming_service = StreamingService()
-        chat_orchestrator = ChatOrchestrator(
-            chat_service, session_manager, streaming_service
-        )
+        chat_orchestrator = ChatOrchestrator(session_manager)
 
         # Both orchestrators have similar interfaces
         assert hasattr(vote_orchestrator, "process_vote_request")
@@ -187,7 +186,7 @@ class TestOrchestratorArchitecture:
 
         # Both follow dependency injection
         assert vote_orchestrator.vote_service is not None
-        assert chat_orchestrator.chat_service is not None
+        assert chat_orchestrator.session_manager is not None
 
         print("✅ Consistent architecture patterns across all features")
 

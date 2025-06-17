@@ -6,7 +6,7 @@ Coordinates vote processing, logging, and response formatting.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any
 
 from app.models.vote import VoteRequest, VoteResponse
 from app.services.vote_service import VoteService
@@ -36,7 +36,7 @@ class VoteOrchestrator:
         self.logger = logging.getLogger(__name__)
 
     async def process_vote_request(
-        self, request: VoteRequest, auth_claims: Dict[str, Any]
+        self, request: VoteRequest, auth_claims: dict[str, Any]
     ) -> VoteResponse:
         """
         Process a complete vote request workflow.
@@ -60,15 +60,35 @@ class VoteOrchestrator:
                 },
             )
 
+            # Convert request to dict for the service
+            vote_data = {
+                "user_query": request.user_query,
+                "chatbot_response": request.chatbot_response,
+                "upvote": request.upvote,
+                "downvote": request.downvote,
+                "count": request.count,
+                "reason_multiple_choice": request.reason_multiple_choice,
+                "additional_comments": request.additional_comments,
+            }
+
             # Process the vote using the vote service
-            response = await self.vote_service.process_vote(request)
+            service_response = await self.vote_service.process_vote(vote_data)
+
+            # Convert service response back to VoteResponse model
+            response = VoteResponse(
+                user_query=request.user_query,
+                message=request.chatbot_response,
+                upvote=request.upvote,
+                downvote=request.downvote,
+                count=request.count,
+            )
 
             self.logger.info(
                 "Vote processed successfully",
                 extra={
                     "user_id": auth_claims.get("oid", "unknown"),
                     "vote_type": "upvote" if request.upvote else "downvote",
-                    "count": response.count,
+                    "vote_id": service_response.get("vote_id"),
                 },
             )
 

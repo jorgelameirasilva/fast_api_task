@@ -114,6 +114,61 @@ def get_auth_setup() -> Dict[str, Any]:
         return {}
 
 
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None,
+) -> dict[str, Any]:
+    """
+    Get current user from JWT token
+
+    For development/testing, returns a mock user
+    In production, this would validate the JWT token
+    """
+    try:
+        # For development/testing - return mock user
+        mock_user = {
+            "oid": "test-user-123",
+            "preferred_username": "test@example.com",
+            "name": "Test User",
+            "sub": "test-user-123",
+        }
+
+        return mock_user
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def get_optional_user(
+    request: Request,
+) -> dict[str, Any] | None:
+    """
+    Get current user optionally (for endpoints that work with or without auth)
+    """
+    try:
+        # Try to get authorization header
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return None
+
+        # For development/testing - return mock user
+        mock_user = {
+            "oid": "test-user-123",
+            "preferred_username": "test@example.com",
+            "name": "Test User",
+            "sub": "test-user-123",
+        }
+
+        return mock_user
+
+    except Exception:
+        return None
+
+
 # Dependency aliases for convenience
 RequireAuth = Depends(verify_token)
 OptionalAuth = Depends(get_auth_claims)

@@ -1,21 +1,20 @@
 """Pydantic models for vote API"""
 
-from typing import Optional, Union, Dict, Any
-from pydantic import BaseModel, Field, validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class VoteRequest(BaseModel):
     """Vote request model"""
 
-    user_query: Union[str, Dict] = Field(..., description="User query text")
-    chatbot_response: Union[str, Dict] = Field(..., description="Chatbot response text")
+    user_query: str | dict = Field(..., description="User query text")
+    chatbot_response: str | dict = Field(..., description="Chatbot response text")
     upvote: int = Field(..., description="Upvote value (0 or 1)")
     downvote: int = Field(..., description="Downvote value (0 or 1)")
     count: int = Field(..., description="Count value (1 or -1)")
-    reason_multiple_choice: Optional[Union[str, Dict]] = Field(
+    reason_multiple_choice: str | dict | None = Field(
         default=None, description="Reason for downvote"
     )
-    additional_comments: Optional[Union[str, Dict]] = Field(
+    additional_comments: str | dict | None = Field(
         default=None, description="Additional comments"
     )
 
@@ -23,7 +22,8 @@ class VoteRequest(BaseModel):
     class Config:
         extra = "allow"
 
-    @validator("upvote")
+    @field_validator("upvote")
+    @classmethod
     def validate_upvote(cls, v):
         if v not in [0, 1]:
             raise ValueError(
@@ -31,7 +31,8 @@ class VoteRequest(BaseModel):
             )
         return v
 
-    @validator("downvote")
+    @field_validator("downvote")
+    @classmethod
     def validate_downvote(cls, v):
         if v not in [0, 1]:
             raise ValueError(
@@ -39,7 +40,8 @@ class VoteRequest(BaseModel):
             )
         return v
 
-    @validator("count")
+    @field_validator("count")
+    @classmethod
     def validate_count(cls, v):
         if v not in [-1, 1]:
             raise ValueError(f"Count must be either 1 or -1, but got {v}.")
@@ -56,7 +58,8 @@ class VoteRequest(BaseModel):
             raise ValueError("Neither an upvote nor a downvote were recorded.")
         return self
 
-    @validator("user_query")
+    @field_validator("user_query")
+    @classmethod
     def validate_user_query(cls, v):
         if not isinstance(v, str) and v != {}:
             raise ValueError(
@@ -66,7 +69,8 @@ class VoteRequest(BaseModel):
             raise ValueError("user_query cannot be empty")
         return v
 
-    @validator("chatbot_response")
+    @field_validator("chatbot_response")
+    @classmethod
     def validate_chatbot_response(cls, v):
         if not isinstance(v, str) and v != {}:
             raise ValueError(
@@ -74,7 +78,8 @@ class VoteRequest(BaseModel):
             )
         return v
 
-    @validator("reason_multiple_choice")
+    @field_validator("reason_multiple_choice")
+    @classmethod
     def validate_reason_multiple_choice(cls, v):
         if v is not None and not isinstance(v, str) and v != {}:
             raise ValueError(
@@ -82,7 +87,8 @@ class VoteRequest(BaseModel):
             )
         return v
 
-    @validator("additional_comments")
+    @field_validator("additional_comments")
+    @classmethod
     def validate_additional_comments(cls, v):
         if v is not None and not isinstance(v, str) and v != {}:
             raise ValueError(f"additional_comments must be a string, but got {type(v)}")
@@ -92,8 +98,8 @@ class VoteRequest(BaseModel):
 class VoteResponse(BaseModel):
     """Vote response model"""
 
-    user_query: Union[str, Dict] = Field(..., description="User query")
-    message: Union[str, Dict] = Field(
+    user_query: str | dict = Field(..., description="User query")
+    message: str | dict = Field(
         ..., description="Chatbot response (renamed from chatbot_response)"
     )
     upvote: int = Field(..., description="Upvote value")
