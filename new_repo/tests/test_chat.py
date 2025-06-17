@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 
 def test_chat_basic_functionality(client: TestClient, sample_chat_request):
-    """Test basic chat functionality with unified streaming architecture"""
+    """Test basic chat functionality with simplified architecture"""
     response = client.post("/chat", json=sample_chat_request)
 
     assert response.status_code == 200
@@ -37,21 +37,20 @@ def test_chat_basic_functionality(client: TestClient, sample_chat_request):
 
         # Check if it's a valid response (either success or error)
         if "error" not in data:
-            # Success response - check new ChatResponse structure with choices array
-            assert "choices" in data
-            assert len(data["choices"]) > 0
+            # Success response - check old format with message, data_points, etc.
+            assert "message" in data
+            assert "data_points" in data
 
-            choice = data["choices"][0]
-            assert "message" in choice
-            assert "role" in choice["message"]
-            assert "content" in choice["message"]
-            assert choice["message"]["role"] == "assistant"
-            assert len(choice["message"]["content"]) > 0
+            # Check message structure (should be serialized dict with content)
+            message = data["message"]
+            assert "content" in message
+            assert len(message["content"]) > 0
 
-            # Check for session_state in response (might be None in fallback mode)
-            assert "session_state" in data
+            # Check data_points
+            assert isinstance(data["data_points"], list)
+            assert len(data["data_points"]) > 0
 
-            print("✅ Chat orchestrator returns unified streaming response")
+            print("✅ Chat orchestrator returns old format response")
         else:
             # Error response - acceptable in mock/test mode
             assert "error" in data
@@ -103,10 +102,13 @@ def test_chat_with_context(client: TestClient):
 
         # Check if it's a valid response (either success or error)
         if "error" not in data:
-            assert "choices" in data
-            assert len(data["choices"]) > 0
-            assert data["choices"][0]["message"]["role"] == "assistant"
-            assert "session_state" in data
+            # Success response - check old format
+            assert "message" in data
+            assert "data_points" in data
+
+            message = data["message"]
+            assert "content" in message
+            assert len(message["content"]) > 0
         else:
             # Error response - acceptable in mock/test mode
             assert "error" in data
@@ -146,10 +148,13 @@ def test_chat_multiple_messages(client: TestClient):
 
         # Check if it's a valid response (either success or error)
         if "error" not in data:
-            assert "choices" in data
-            assert len(data["choices"]) > 0
-            assert data["choices"][0]["message"]["role"] == "assistant"
-            assert "session_state" in data
+            # Success response - check old format
+            assert "message" in data
+            assert "data_points" in data
+
+            message = data["message"]
+            assert "content" in message
+            assert len(message["content"]) > 0
         else:
             # Error response - acceptable in mock/test mode
             assert "error" in data
@@ -218,47 +223,15 @@ def test_chat_with_session_management(client: TestClient):
 
         # Check if it's a valid response (either success or error)
         if "error" not in data:
-            assert "session_state" in data
-            # Session state might be None in mock mode, that's ok
+            # Success response - check old format (session_state may not be present in old format)
+            assert "message" in data
+            assert "data_points" in data
 
-            # Get the session state for follow-up (if available)
-            session_state = data.get("session_state")
+            message = data["message"]
+            assert "content" in message
+            assert len(message["content"]) > 0
 
-            # Second request - continue conversation (if we have a session)
-            if session_state:
-                request_data_2 = {
-                    "messages": [
-                        {"role": "user", "content": "What's my previous message?"}
-                    ],
-                    "context": {},
-                    "stream": False,
-                    "session_state": session_state,  # Continue session
-                }
-
-                response_2 = client.post("/chat", json=request_data_2)
-                assert response_2.status_code == 200
-
-                # Parse second response
-                response_text_2 = response_2.text.strip()
-                if response_text_2:
-                    lines_2 = response_text_2.split("\n")
-                    first_line_2 = lines_2[0] if lines_2[0] else ""
-
-                    if first_line_2.startswith("data: "):
-                        json_str_2 = first_line_2[6:]
-                    else:
-                        json_str_2 = first_line_2
-
-                    data_2 = json.loads(json_str_2) if json_str_2 else {}
-
-                    if "error" not in data_2:
-                        assert "session_state" in data_2
-                        assert data_2["session_state"] == session_state  # Same session
-
-            print("✅ Chat orchestrator properly manages sessions")
+            print("✅ Session management test passed with old format")
         else:
             # Error response - acceptable in mock/test mode
-            print(
-                "⚠️ Session management test skipped due to mock error:",
-                data.get("error"),
-            )
+            assert "error" in data

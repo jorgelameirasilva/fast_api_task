@@ -193,62 +193,59 @@ Based on the available HR documents and company policies, I can provide guidance
                 """Create a streaming chat completion response"""
                 response = self._create_response(messages, model, **kwargs)
 
-                # Convert to streaming format
-                async def stream_generator():
-                    content = response.choices[0].message.content
-                    words = content.split()
+                # Convert to streaming format - return the generator directly
+                content = response.choices[0].message.content
+                words = content.split()
 
-                    for i, word in enumerate(words):
-                        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+                for i, word in enumerate(words):
+                    chunk_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
 
-                        chunk_message = ChatCompletionMessage(
-                            content=word + " " if i < len(words) - 1 else word,
-                            role="assistant",
-                        )
+                    chunk_message = ChatCompletionMessage(
+                        content=word + " " if i < len(words) - 1 else word,
+                        role="assistant",
+                    )
 
-                        chunk = ChatCompletion(
-                            id=chunk_id,
-                            choices=[
-                                Choice(
-                                    finish_reason=(
-                                        None if i < len(words) - 1 else "stop"
-                                    ),
-                                    index=0,
-                                    message=chunk_message,
-                                )
-                            ],
-                            created=int(time.time()),
-                            model=model,
-                            object="chat.completion.chunk",
-                        )
+                    chunk = ChatCompletion(
+                        id=chunk_id,
+                        choices=[
+                            Choice(
+                                finish_reason=(
+                                    "length" if i < len(words) - 1 else "stop"
+                                ),
+                                index=0,
+                                message=chunk_message,
+                            )
+                        ],
+                        created=int(time.time()),
+                        model=model,
+                        object="chat.completion",
+                    )
 
-                        yield {
-                            "choices": [
-                                {
-                                    "delta": {
-                                        "content": (
-                                            word + " " if i < len(words) - 1 else word
-                                        )
-                                    }
-                                }
-                            ]
-                        }
-                        await asyncio.sleep(0.05)  # Simulate streaming delay
-
-                    # Final chunk with context
-                    final_chunk = {
+                    yield {
                         "choices": [
                             {
-                                "delta": {},
-                                "finish_reason": "stop",
-                                "index": 0,
-                                "context": response.choices[0].message.context,
+                                "delta": {
+                                    "content": (
+                                        word + " " if i < len(words) - 1 else word
+                                    )
+                                }
                             }
                         ]
                     }
-                    yield final_chunk
+                    await asyncio.sleep(0.05)  # Simulate streaming delay
 
-                return stream_generator()
+                # Final chunk with context
+                final_chunk = {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "stop",
+                            "index": 0,
+                            "context": response.choices[0].message.context,
+                        }
+                    ]
+                }
+                yield final_chunk
 
     class Embeddings:
         async def create(self, input=None, model="text-embedding-ada-002", **kwargs):

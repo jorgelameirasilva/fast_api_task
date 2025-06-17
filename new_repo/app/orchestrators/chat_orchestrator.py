@@ -1,147 +1,89 @@
 """
-Chat Orchestrator - Simplified to match old design
-
-Coordinates chat processing by calling the approach directly.
-The approach handles streaming vs non-streaming automatically.
+Chat Orchestrator - Orchestrates chat requests following SOLID principles
+Single Responsibility: Coordinates between services and handles response formatting
 """
 
-import json
 import logging
+import json
 from typing import Any
-from collections.abc import AsyncGenerator
 from fastapi.responses import StreamingResponse
 
-from app.models.chat import ChatRequest, ChatResponse, ChatChoice, ChatMessage
+from app.models.chat import ChatRequest
 from app.services.chat_service import chat_service
 from app.services.session_manager import SessionManager
+from app.utils import make_json_serializable
 
 logger = logging.getLogger(__name__)
 
 
 class ChatOrchestrator:
     """
-    Simplified orchestrator that calls approach directly like the old design
+    Orchestrates chat requests following SOLID principles
+    Single Responsibility: Coordinate chat processing and response formatting
     """
 
     def __init__(self, session_manager: SessionManager):
         self.session_manager = session_manager
-        self.logger = logging.getLogger(__name__)
 
     async def process_chat_request(
         self, request: ChatRequest, current_user: dict[str, Any]
-    ) -> StreamingResponse:
+    ):
         """
-        Process a chat request - simplified to match old design
+        Process chat request - orchestrates the flow
+        Returns appropriate StreamingResponse for both streaming and non-streaming
         """
-        user_id = current_user.get("oid", "unknown")
-
         try:
-            self.logger.info(f"Processing chat request for user: {user_id}")
+            logger.info(f"Chat request from user: {current_user.get('oid', 'unknown')}")
 
-            # Prepare context like the old design
-            context = request.context.copy() if request.context else {}
-            context["auth_claims"] = current_user
+            # Prepare context
+            context = self._prepare_context(request, current_user)
 
-            # Call the approach directly - it handles streaming/non-streaming
-            result = await chat_service.process_chat_simple(request, context)
+            # Get result from chat service
+            result = await chat_service.process_chat(request, context)
 
-            # Convert result to streaming response
-            if isinstance(result, dict):
-                # Non-streaming response - convert to streaming format
-                return self._create_streaming_response_from_dict(
-                    result, request.session_state
-                )
-            else:
-                # Already streaming - wrap it
-                return self._create_streaming_response_from_generator(result)
+            # Format and return response
+            return self._format_response(result)
 
         except Exception as e:
-            self.logger.error(f"Chat processing failed for user {user_id}: {str(e)}")
-            return self._create_error_streaming_response(str(e), request.session_state)
+            logger.error(f"Chat processing failed: {str(e)}")
+            raise
 
-    def _create_streaming_response_from_dict(
-        self, result: dict[str, Any], session_state: str = None
-    ) -> StreamingResponse:
-        """Convert dict result to streaming response"""
+    def _prepare_context(
+        self, request: ChatRequest, current_user: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Prepare context for chat processing"""
+        context = request.context.copy() if request.context else {}
+        context["auth_claims"] = current_user
+        return context
 
-        async def generate():
-            # Convert to ChatResponse format
-            try:
-                message_obj = result.get("message")
-                if hasattr(message_obj, "content"):
-                    message_content = message_obj.content
-                else:
-                    message_content = str(message_obj) if message_obj else ""
+    def _format_response(self, result) -> StreamingResponse:
+        """Format result as NDJSON streaming response"""
+        if isinstance(result, dict):
+            # Non-streaming: convert to single NDJSON line
+            return self._format_dict_response(result)
+        else:
+            # Streaming: format as NDJSON
+            return self._format_stream_response(result)
 
-                # Create response in the format expected by tests
-                response_data = {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": message_content,
-                            },
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "session_state": session_state,
-                }
+    def _format_dict_response(self, result: dict) -> StreamingResponse:
+        """Format dict result as single NDJSON line"""
+        serializable_result = make_json_serializable(result)
 
-                yield f"data: {json.dumps(response_data)}\n\n"
-            except Exception as e:
-                logger.error(f"Error formatting response: {e}")
-                error_data = {
-                    "error": f"Error formatting response: {str(e)}",
-                    "session_state": session_state,
-                }
-                yield f"data: {json.dumps(error_data)}\n\n"
+        async def generate_single():
+            yield f"data: {json.dumps(serializable_result)}\n\n"
+
+        return StreamingResponse(generate_single(), media_type="application/json-lines")
+
+    def _format_stream_response(self, result) -> StreamingResponse:
+        """Format streaming result as NDJSON"""
+
+        async def serialize_and_format():
+            async for chunk in result:
+                serialized_chunk = make_json_serializable(chunk)
+                yield f"data: {json.dumps(serialized_chunk, default=str)}\n\n"
 
         return StreamingResponse(
-            generate(),
-            media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache"},
-        )
-
-    def _create_streaming_response_from_generator(
-        self, result: AsyncGenerator
-    ) -> StreamingResponse:
-        """Wrap async generator in streaming response"""
-
-        async def generate():
-            try:
-                async for chunk in result:
-                    # Format chunk as NDJSON
-                    yield f"data: {json.dumps(chunk)}\n\n"
-            except Exception as e:
-                logger.error(f"Error in streaming: {e}")
-                error_data = {
-                    "error": f"Streaming error: {str(e)}",
-                    "session_state": None,
-                }
-                yield f"data: {json.dumps(error_data)}\n\n"
-
-        return StreamingResponse(
-            generate(),
-            media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache"},
-        )
-
-    def _create_error_streaming_response(
-        self, error_message: str, session_state: str = None
-    ) -> StreamingResponse:
-        """Create error response in streaming format"""
-
-        async def generate():
-            error_data = {
-                "error": f"The app encountered an error processing your request. Error: {error_message}",
-                "session_state": session_state,
-            }
-            yield f"data: {json.dumps(error_data)}\n\n"
-
-        return StreamingResponse(
-            generate(),
-            media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache"},
+            serialize_and_format(), media_type="application/json-lines"
         )
 
 

@@ -303,8 +303,12 @@ If you cannot generate a search query, return just the number 0.
         followup_questions_started = False
         followup_content = ""
         async for event_chunk in await chat_coroutine:
-            event = event_chunk.model_dump()
-            if event["object"] == "chat.completion.chunk":
+            # Handle both Pydantic models and plain dictionaries
+            if hasattr(event_chunk, "model_dump"):
+                event = event_chunk.model_dump()
+            else:
+                event = event_chunk
+            if event.get("object") == "chat.completion.chunk" or event.get("choices"):
                 if (
                     event["choices"]
                     and event["choices"][0]

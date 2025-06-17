@@ -47,15 +47,11 @@ class TestOrchestratorsIntegration:
 
             # Check if it's a valid response (either success or error)
             if "error" not in data:
-                # Verify ChatResponse structure (orchestrator output)
-                assert "choices" in data
-                assert len(data["choices"]) > 0
-                assert "session_state" in data
-
-                choice = data["choices"][0]
-                assert "message" in choice
-                assert choice["message"]["role"] == "assistant"
-                assert len(choice["message"]["content"]) > 0
+                # Verify ChatResponse structure (orchestrator output) - old format
+                assert "message" in data
+                assert data["message"]["role"] == "assistant"
+                assert len(data["message"]["content"]) > 0
+                assert "data_points" in data
 
                 session_state = data.get("session_state")
                 print(f"✅ Chat orchestrator created session: {session_state}")
@@ -95,7 +91,7 @@ class TestOrchestratorsIntegration:
                             assert (
                                 data_2.get("session_state") == session_state
                             )  # Same session
-                            assert "choices" in data_2
+                            assert "message" in data_2
 
                     print("✅ Chat orchestrator maintains session continuity")
             else:
@@ -182,8 +178,8 @@ class TestOrchestratorsIntegration:
             chat_data = json.loads(json_str) if json_str else {}
 
             # Check if it's a valid response (either success or error)
-            if "error" not in chat_data and "choices" in chat_data:
-                assistant_message = chat_data["choices"][0]["message"]["content"]
+            if "error" not in chat_data and "message" in chat_data:
+                assistant_message = chat_data["message"]["content"]
 
                 print("✅ User received chat response")
 
