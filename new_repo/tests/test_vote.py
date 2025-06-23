@@ -195,3 +195,4 @@ def test_neither_votes_error(client: TestClient):
 
     response = client.post("/vote", json=test_payload)
     assert response.status_code == 400 or response.status_code == 422
+

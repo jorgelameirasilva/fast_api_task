@@ -1,174 +1,159 @@
 """Authentication dependencies for FastAPI"""
 
 import logging
-from typing import Optional, Dict, Any
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import os
+import time
+import datetime
+from typing import Dict, Any
+from fastapi import Depends, HTTPException, Request
+from jwt import PyJWKClient
+import jwt
 
 from app.core.config import settings
-from app.core.authentication import AuthenticationHelper
+from app.core.authentication import AuthenticationHelper, AuthError
 
 logger = logging.getLogger(__name__)
 
-# HTTP Bearer token scheme
-security = HTTPBearer(auto_error=False)
-
 # Global authentication helper instance
-auth_helper: Optional[AuthenticationHelper] = None
+_auth_helper: AuthenticationHelper | None = None
 
 
 def get_auth_helper() -> AuthenticationHelper:
-    """Get or create authentication helper"""
-    global auth_helper
-    if auth_helper is None:
-        auth_helper = AuthenticationHelper(
-            use_authentication=settings.azure_use_authentication,
-            server_app_id=settings.azure_server_app_id,
-            server_app_secret=settings.azure_server_app_secret,
-            client_app_id=settings.azure_client_app_id,
-            tenant_id=settings.azure_tenant_id,
+    """Get or create authentication helper instance"""
+    global _auth_helper
+    if _auth_helper is None:
+        use_authentication = bool(int(os.environ.get("REQUIRE_AUTHENTICATION", 1)))
+        _auth_helper = AuthenticationHelper(
+            use_authentication=use_authentication,
+            server_app_id=settings.azure_server_app_id or "default",
+            server_app_secret=settings.azure_server_app_secret or "default",
+            client_app_id=settings.azure_client_app_id or "default",
+            tenant_id=settings.azure_tenant_id or "default",
             token_cache_path=settings.token_cache_path,
         )
-    return auth_helper
+    return _auth_helper
 
 
-async def verify_token(
-    request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> Dict[str, Any]:
+async def require_user(request: Request) -> Dict[str, Any]:
     """
-    Verify Bearer token and return auth claims
-
-    This dependency replicates the @token_required decorator behavior
-    from the original Quart application.
+    FastAPI dependency to require authenticated user
+    Replicates the exact same logic as the old token_required decorator
     """
+    REQUIRE_AUTHENTICATION = int(os.environ.get("REQUIRE_AUTHENTICATION", 1))
 
-    # If authentication is disabled, return empty claims
-    if not settings.azure_use_authentication:
-        return {}
+    if REQUIRE_AUTHENTICATION:
+        AUDIENCE = os.environ.get("APP_AUTHENTICATION_CLIENT_ID", None)
+        ISSUER = "https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/v2.0"
+        JWKS_URL = f"https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/discovery/v2.0/keys"
 
-    # Check for authorization header
-    if not credentials:
-        logger.warning("Missing authorization header")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header required",
-            headers={"WWW-Authenticate": "Bearer"},
+        now = datetime.datetime.now()
+        current_timestamp = int(now.timestamp())
+
+        auth = request.headers.get("Authorization", None)
+        if not auth:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "authorization_header_missing",
+                    "description": "Authorization header is expected",
+                },
+            )
+
+        parts = auth.split()
+        if parts[0].lower() != "bearer":
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "invalid_header",
+                    "description": "Authorization header must start with Bearer",
+                },
+            )
+        elif len(parts) == 1:
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "invalid_header", "description": "Token not found"},
+            )
+        elif len(parts) > 2:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "invalid_header",
+                    "description": "Authorization header must be a bearer token",
+                },
+            )
+
+        token = auth.split()[-1].strip()
+        jwk_client = PyJWKClient(JWKS_URL)
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+        decoded_token = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=AUDIENCE,
+            issuer=ISSUER,
         )
 
-    try:
-        # Get authentication helper
-        auth = get_auth_helper()
+        if decoded_token["iss"] != ISSUER:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "invalid_issuer",
+                    "description": "Token contains Invalid Issuer",
+                },
+            )
 
-        # Create headers dict compatible with original auth helper
+        if decoded_token["aud"] != AUDIENCE:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "invalid_audience",
+                    "description": "Token contains Invalid Audience",
+                },
+            )
+
+        if decoded_token["exp"] < current_timestamp:
+            raise HTTPException(status_code=401, detail="Token has expired")
+
+    # After JWT validation (or if auth disabled), get auth claims using MSAL On-Behalf-Of flow
+    try:
+        # Get the authentication helper instance
+        auth_helper = get_auth_helper()
+
+        # Get headers from request
         headers = dict(request.headers)
 
-        # Get auth claims using the same method as original
-        auth_claims = await auth.get_auth_claims_if_enabled(headers)
+        # Use the exact same auth claims logic as old repo
+        auth_claims = await auth_helper.get_auth_claims_if_enabled(headers)
 
-        logger.info("Token verification successful")
-        return auth_claims or {}
+        return auth_claims
 
+    except AuthError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.error)
     except Exception as e:
-        logger.error(f"Token verification failed: {str(e)}")
+        logging.exception("Error getting current user")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=401,
+            detail={
+                "code": "authentication_error",
+                "description": f"Authentication error: {str(e)}",
+            },
         )
 
 
-async def get_auth_claims(request: Request) -> Dict[str, Any]:
-    """
-    Get authentication claims for the current request
-
-    This is used when you need auth claims but want to handle
-    authentication errors differently than the verify_token dependency.
-    """
-    try:
-        # Get authentication helper
-        auth = get_auth_helper()
-
-        # Create headers dict compatible with original auth helper
-        headers = dict(request.headers)
-
-        # Get auth claims
-        auth_claims = await auth.get_auth_claims_if_enabled(headers)
-        return auth_claims or {}
-
-    except Exception as e:
-        logger.error(f"Failed to get auth claims: {str(e)}")
-        return {}
+# Alias for backward compatibility
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    """Alias for require_user for backward compatibility"""
+    return await require_user(request)
 
 
 def get_auth_setup() -> Dict[str, Any]:
     """
     Get authentication setup for client-side configuration
-
-    Equivalent to the /auth_setup endpoint from the original app
+    Uses exactly the same logic as the old repo
     """
     try:
-        auth = get_auth_helper()
-        return auth.get_auth_setup_for_client()
+        auth_helper = get_auth_helper()
+        return auth_helper.get_auth_setup_for_client()
     except Exception as e:
         logger.error(f"Failed to get auth setup: {str(e)}")
         return {}
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    request: Request = None,
-) -> dict[str, Any]:
-    """
-    Get current user from JWT token
-
-    For development/testing, returns a mock user
-    In production, this would validate the JWT token
-    """
-    try:
-        # For development/testing - return mock user
-        mock_user = {
-            "oid": "test-user-123",
-            "preferred_username": "test@example.com",
-            "name": "Test User",
-            "sub": "test-user-123",
-        }
-
-        return mock_user
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-async def get_optional_user(
-    request: Request,
-) -> dict[str, Any] | None:
-    """
-    Get current user optionally (for endpoints that work with or without auth)
-    """
-    try:
-        # Try to get authorization header
-        auth_header = request.headers.get("authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return None
-
-        # For development/testing - return mock user
-        mock_user = {
-            "oid": "test-user-123",
-            "preferred_username": "test@example.com",
-            "name": "Test User",
-            "sub": "test-user-123",
-        }
-
-        return mock_user
-
-    except Exception:
-        return None
-
-
-# Dependency aliases for convenience
-RequireAuth = Depends(verify_token)
-OptionalAuth = Depends(get_auth_claims)

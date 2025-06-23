@@ -46,3 +46,4 @@ class ClientException(ChatbotException):
     """Exception for client-related errors"""
 
     pass
+

@@ -191,6 +191,13 @@ Based on the available HR documents and company policies, I can provide guidance
 
             async def _create_stream_response(self, messages, model, **kwargs):
                 """Create a streaming chat completion response"""
+                # Import at the top to avoid naming conflicts
+                from openai.types.chat import ChatCompletionChunk
+                from openai.types.chat.chat_completion_chunk import (
+                    Choice as ChunkChoice,
+                    ChoiceDelta,
+                )
+
                 response = self._create_response(messages, model, **kwargs)
 
                 # Convert to streaming format - return the generator directly
@@ -200,52 +207,39 @@ Based on the available HR documents and company policies, I can provide guidance
                 for i, word in enumerate(words):
                     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
 
-                    chunk_message = ChatCompletionMessage(
-                        content=word + " " if i < len(words) - 1 else word,
-                        role="assistant",
+                    chunk_choice = ChunkChoice(
+                        delta=ChoiceDelta(
+                            content=word + " " if i < len(words) - 1 else word
+                        ),
+                        finish_reason=None,
+                        index=0,
                     )
 
-                    chunk = ChatCompletion(
+                    streaming_chunk = ChatCompletionChunk(
                         id=chunk_id,
-                        choices=[
-                            Choice(
-                                finish_reason=(
-                                    "length" if i < len(words) - 1 else "stop"
-                                ),
-                                index=0,
-                                message=chunk_message,
-                            )
-                        ],
+                        choices=[chunk_choice],
                         created=int(time.time()),
                         model=model,
-                        object="chat.completion",
+                        object="chat.completion.chunk",
                     )
 
-                    yield {
-                        "choices": [
-                            {
-                                "delta": {
-                                    "content": (
-                                        word + " " if i < len(words) - 1 else word
-                                    )
-                                }
-                            }
-                        ]
-                    }
+                    yield streaming_chunk
                     await asyncio.sleep(0.05)  # Simulate streaming delay
 
                 # Final chunk with context
-                final_chunk = {
-                    "choices": [
-                        {
-                            "delta": {},
-                            "finish_reason": "stop",
-                            "index": 0,
-                            "context": response.choices[0].message.context,
-                        }
-                    ]
-                }
-                yield final_chunk
+                final_choice = ChunkChoice(
+                    delta=ChoiceDelta(), finish_reason="stop", index=0
+                )
+
+                final_streaming_chunk = ChatCompletionChunk(
+                    id=f"chatcmpl-{uuid.uuid4().hex[:29]}",
+                    choices=[final_choice],
+                    created=int(time.time()),
+                    model=model,
+                    object="chat.completion.chunk",
+                )
+
+                yield final_streaming_chunk
 
     class Embeddings:
         async def create(self, input=None, model="text-embedding-ada-002", **kwargs):

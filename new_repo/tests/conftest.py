@@ -12,10 +12,13 @@ from app.core.config import settings
 @pytest.fixture(scope="session")
 def test_app():
     """Create test FastAPI app"""
+    import os
+
     # Override settings for testing
     settings.use_mock_clients = True
-    settings.azure_use_authentication = False  # Disable auth for testing
     settings.debug = True
+    # Disable authentication for testing using environment variable
+    os.environ["REQUIRE_AUTHENTICATION"] = "0"
 
     return app
 

@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import time
+import datetime
 from tempfile import TemporaryDirectory
 from typing import Any, Optional
 
@@ -15,7 +17,7 @@ from msal_extensions import (
 )
 
 import jwt
-from jwt import PyJWTError
+from jwt import PyJWTError, PyJWKClient
 from fastapi import Request, HTTPException
 
 
@@ -25,9 +27,99 @@ class AuthError(Exception):
         self.status_code = status_code
 
 
-def token_required():
+def token_required(f):
     """Decorator for token validation"""
-    return {}
+
+    @wraps(f)
+    async def decorated_function(*args, **kwargs):
+        # Extract request from args (FastAPI passes request as first argument)
+        request = None
+        for arg in args:
+            if isinstance(arg, Request):
+                request = arg
+                break
+
+        if not request:
+            raise HTTPException(status_code=500, detail="Request object not found")
+
+        REQUIRE_AUTHENTICATION = int(os.environ.get("REQUIRE_AUTHENTICATION", 1))
+
+        if REQUIRE_AUTHENTICATION:
+            AUDIENCE = os.environ.get("APP_AUTHENTICATION_CLIENT_ID", None)
+            ISSUER = "https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/v2.0"
+            JWKS_URL = f"https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/discovery/v2.0/keys"
+
+            now = datetime.datetime.now()
+            current_timestamp = int(now.timestamp())
+
+            auth = request.headers.get("Authorization", None)
+            if not auth:
+                raise AuthError(
+                    error={
+                        "code": "authorization_header_missing",
+                        "description": "Authorization header is expected",
+                    },
+                    status_code=401,
+                )
+
+            parts = auth.split()
+            if parts[0].lower() != "bearer":
+                raise AuthError(
+                    error={
+                        "code": "invalid_header",
+                        "description": "Authorization header must start with Bearer",
+                    },
+                    status_code=401,
+                )
+            elif len(parts) == 1:
+                raise AuthError(
+                    error={"code": "invalid_header", "description": "Token not found"},
+                    status_code=401,
+                )
+            elif len(parts) > 2:
+                raise AuthError(
+                    error={
+                        "code": "invalid_header",
+                        "description": "Authorization header must be a bearer token",
+                    },
+                    status_code=401,
+                )
+
+            token = auth.split()[-1].strip()
+            jwk_client = PyJWKClient(JWKS_URL)
+            signing_key = jwk_client.get_signing_key_from_jwt(token)
+            decoded_token = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=AUDIENCE,
+                issuer=ISSUER,
+            )
+
+            if decoded_token["iss"] != ISSUER:
+                raise AuthError(
+                    error={
+                        "code": "invalid_issuer",
+                        "description": "Token contains Invalid Issuer",
+                    },
+                    status_code=401,
+                )
+
+            if decoded_token["aud"] != AUDIENCE:
+                raise AuthError(
+                    error={
+                        "code": "invalid_audience",
+                        "description": "Token contains Invalid Audience",
+                    },
+                    status_code=401,
+                )
+
+            if decoded_token["exp"] < current_timestamp:
+                return AuthError(error="Token has expired")
+
+        return await f(*args, **kwargs)
+
+    return decorated_function
 
 
 class AuthenticationHelper:
@@ -72,7 +164,6 @@ class AuthenticationHelper:
             )
 
     def get_auth_setup_for_client(self) -> dict[str, Any]:
-        """Returns JSON list settings used by the client app"""
         return {
             "useLogin": self.use_authentication,
             "msalConfig": {
@@ -89,8 +180,10 @@ class AuthenticationHelper:
                 },
             },
             "loginRequest": {
-                "scopes": ["openid", "profile", "email"],
-                "prompt": "consent",
+                "scopes": [".default"],
+                # Uncomment the following line to cause a consent dialog to appear
+                # For more information, please visit https://learn.microsoft.com
+                # "prompt": "consent"
             },
             "tokenRequest": {
                 "scopes": [f"api://{self.server_app_id}/access_as_user"],
@@ -143,7 +236,7 @@ class AuthenticationHelper:
         overrides: dict[str, Any], auth_claims: dict[str, Any]
     ) -> Optional[str]:
         """
-        Builds a security filter to restrict search results based on user's access claims filters
+        Build different permutations of the oid or groups security filter
         https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search
         https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search-with-aad
         """
@@ -215,7 +308,9 @@ class AuthenticationHelper:
             return {}
 
         try:
-            # Read the token from the Authorization header and exchange it using the On Behalf Of Flow
+            # Read the authentication token from the authorization header and
+            # The scope is set to the Microsoft Graph API, which may need to be
+            # https://learn.microsoft.com/en-us/azure/active-directory/develop/
             auth_token = AuthenticationHelper.get_token_auth_header(headers)
             graph_resource_access_token = (
                 self.confidential_client.acquire_token_on_behalf_of(
@@ -227,20 +322,24 @@ class AuthenticationHelper:
             if "error" in graph_resource_access_token:
                 raise AuthError(error=str(graph_resource_access_token), status_code=401)
 
-            # Read the claims from the response
+            # Read the claims from the response. The oid and groups claims are
+            # https://learn.microsoft.com/en-us/azure/active-directory/develop/id-token-claims
             id_token_claims = graph_resource_access_token.get("id_token_claims", {})
             auth_claims = {
                 "oid": id_token_claims.get("oid"),
                 "groups": id_token_claims.get("groups") or [],
             }
 
-            # Handle groups overage claim
+            # A groups claim may have been omitted either because it was not
+            # or a groups overage claim may have been emitted.
+            # https://learn.microsoft.com/en-us/azure/active-directory/develop/id-token-claims
             missing_groups_claim = "groups" not in id_token_claims
             has_group_overage_claim = any(
                 ("groups" in key) and (value is not None)
                 for key, value in id_token_claims.items()
             )
             if missing_groups_claim or has_group_overage_claim:
+                # Read the user's groups from Microsoft Graph
                 auth_claims["groups"] = await AuthenticationHelper.list_groups(
                     graph_resource_access_token
                 )

@@ -277,3 +277,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 **Built with ❤️ using FastAPI, Azure Services, and Modern Python Practices**
+
