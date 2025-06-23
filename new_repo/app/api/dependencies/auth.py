@@ -157,3 +157,7 @@ def get_auth_setup() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to get auth setup: {str(e)}")
         return {}
+
+
+# FastAPI dependency alias for use in route decorators
+RequireAuth = Depends(require_user)

@@ -1,9 +1,14 @@
 """Test configuration and fixtures"""
 
+import os
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+
+# Set environment variables BEFORE importing app
+os.environ["REQUIRE_AUTHENTICATION"] = "0"
+os.environ["USE_MOCK_CLIENTS"] = "true"
 
 from app.main import app
 from app.core.config import settings
@@ -12,13 +17,9 @@ from app.core.config import settings
 @pytest.fixture(scope="session")
 def test_app():
     """Create test FastAPI app"""
-    import os
-
     # Override settings for testing
     settings.use_mock_clients = True
     settings.debug = True
-    # Disable authentication for testing using environment variable
-    os.environ["REQUIRE_AUTHENTICATION"] = "0"
 
     return app
 

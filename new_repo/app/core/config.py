@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     cosmos_db_partition_key: str = "/user_id"
 
     # Development/Testing
-    use_mock_clients: bool = False
+    use_mock_clients: bool = os.getenv("USE_MOCK_CLIENTS", "false").lower() == "true"
 
     class Config:
         env_file = ".env"

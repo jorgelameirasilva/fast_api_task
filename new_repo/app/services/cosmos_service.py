@@ -1,11 +1,12 @@
-"""Cosmos DB service for session management"""
+"""Simplified MongoDB/CosmosDB service for chat sessions"""
 
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from azure.cosmos.aio import CosmosClient, DatabaseProxy, ContainerProxy
-from azure.cosmos import exceptions
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 from app.core.config import settings
 from app.models.session import ChatSession, SessionSummary, SessionSearchRequest
@@ -14,64 +15,93 @@ from app.models.chat import ChatMessage
 logger = logging.getLogger(__name__)
 
 
-class CosmosSessionService:
-    """Service for managing chat sessions in Cosmos DB"""
+class CosmosService:
+    """Simplified service for managing chat sessions in MongoDB/CosmosDB"""
 
-    def __init__(self):
-        self.client: Optional[CosmosClient] = None
-        self.database: Optional[DatabaseProxy] = None
-        self.container: Optional[ContainerProxy] = None
-        self._initialized = False
+    def __init__(
+        self,
+        connection_string: str,
+        database_name: str,
+        collection_name: str = "sessions",
+    ):
+        self.connection_string = connection_string
+        self.database_name = database_name
+        self.collection_name = collection_name
+        self._client: Optional[MongoClient] = None
+        self._collection = None
 
-    async def initialize(self):
-        """Initialize Cosmos DB client and ensure database/container exist"""
-        if self._initialized:
-            return
+    @property
+    def collection(self):
+        """Lazy initialization of MongoDB collection"""
+        if self._collection is None:
+            if self._client is None:
+                self._client = MongoClient(self.connection_string)
+                logger.info("MongoDB client initialized")
 
+            database = self._client[self.database_name]
+            self._collection = database[self.collection_name]
+            self._create_indexes()
+        return self._collection
+
+    def _create_indexes(self) -> None:
+        """Create necessary indexes for optimal performance"""
         try:
-            if not settings.cosmos_db_endpoint or not settings.cosmos_db_key:
-                logger.warning("Cosmos DB credentials not configured, using mock mode")
-                self._initialized = True
-                return
+            self._collection.create_index("user_id")
+            self._collection.create_index([("user_id", 1), ("is_active", 1)])
+            self._collection.create_index("updated_at")
+            logger.info("Database indexes created successfully")
+        except PyMongoError as e:
+            logger.warning(f"Failed to create indexes: {e}")
 
-            # Initialize client
-            self.client = CosmosClient(
-                url=settings.cosmos_db_endpoint, credential=settings.cosmos_db_key
-            )
+    def _to_document(self, session: ChatSession) -> Dict[str, Any]:
+        """Convert ChatSession to MongoDB document"""
+        doc = session.model_dump()
+        doc["_id"] = session.id
+        doc["created_at"] = session.created_at.isoformat()
+        doc["updated_at"] = session.updated_at.isoformat()
+        doc["messages"] = [msg.model_dump() for msg in session.messages]
+        return doc
 
-            # Create database if it doesn't exist
-            database_name = settings.cosmos_db_database_name
-            try:
-                self.database = await self.client.create_database_if_not_exists(
-                    id=database_name
-                )
-                logger.info(f"Database '{database_name}' ready")
-            except Exception as e:
-                logger.error(f"Failed to create/access database: {e}")
-                raise
+    def _from_document(self, doc: Dict[str, Any]) -> ChatSession:
+        """Convert MongoDB document to ChatSession"""
+        doc["id"] = doc.pop("_id")
+        doc["partition_key"] = doc["user_id"]  # Set partition_key same as user_id
+        doc["created_at"] = datetime.fromisoformat(doc["created_at"])
+        doc["updated_at"] = datetime.fromisoformat(doc["updated_at"])
+        doc["messages"] = [ChatMessage(**msg) for msg in doc.get("messages", [])]
+        return ChatSession(**doc)
 
-            # Create container if it doesn't exist
-            container_name = settings.cosmos_db_container_name
-            try:
-                self.container = await self.database.create_container_if_not_exists(
-                    id=container_name,
-                    partition_key={
-                        "kind": "Hash",
-                        "paths": [settings.cosmos_db_partition_key],
-                    },
-                    offer_throughput=400,  # RU/s for shared throughput
-                )
-                logger.info(f"Container '{container_name}' ready")
-            except Exception as e:
-                logger.error(f"Failed to create/access container: {e}")
-                raise
+    def _to_summary(self, doc: Dict[str, Any]) -> SessionSummary:
+        """Convert MongoDB document to SessionSummary"""
+        return SessionSummary(
+            id=doc["_id"],
+            user_id=doc["user_id"],
+            title=doc.get("title"),
+            created_at=datetime.fromisoformat(doc["created_at"]),
+            updated_at=datetime.fromisoformat(doc["updated_at"]),
+            message_count=len(doc.get("messages", [])),
+            is_active=doc.get("is_active", True),
+        )
 
-            self._initialized = True
-            logger.info("Cosmos DB service initialized successfully")
+    def _generate_title(self, first_message: str, max_length: int = 50) -> str:
+        """Generate a session title from the first user message"""
+        title = first_message.strip()
+        if len(title) > max_length:
+            title = title[: max_length - 3] + "..."
+        return title
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Cosmos DB service: {e}")
-            raise
+    def _trim_messages(
+        self, messages: List[ChatMessage], max_messages: int
+    ) -> List[ChatMessage]:
+        """Trim messages keeping system messages and most recent others"""
+        system_messages = [msg for msg in messages if msg.role == "system"]
+        other_messages = [msg for msg in messages if msg.role != "system"]
+
+        messages_to_keep = max_messages - len(system_messages)
+        if messages_to_keep > 0:
+            other_messages = other_messages[-messages_to_keep:]
+
+        return system_messages + other_messages
 
     async def create_session(
         self,
@@ -81,267 +111,192 @@ class CosmosSessionService:
         max_messages: int = 50,
     ) -> ChatSession:
         """Create a new chat session"""
-        await self.initialize()
-
-        session_id = str(uuid.uuid4())
-        now = datetime.utcnow()
-
         session = ChatSession(
-            id=session_id,
+            id=str(uuid.uuid4()),
             user_id=user_id,
-            partition_key=user_id,
+            partition_key=user_id,  # Use user_id as partition key
             title=title,
+            messages=[],
             context=context or {},
             max_messages=max_messages,
-            created_at=now,
-            updated_at=now,
-            messages=[],
             is_active=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
 
-        if self.container:
-            try:
-                await self.container.create_item(
-                    body=session.model_dump(), partition_key=user_id
-                )
-                logger.info(f"Created session {session_id} for user {user_id}")
-            except exceptions.CosmosHttpResponseError as e:
-                logger.error(f"Failed to create session: {e}")
-                raise
-
-        return session
+        try:
+            document = self._to_document(session)
+            self.collection.insert_one(document)
+            logger.info(f"Created session {session.id} for user {user_id}")
+            return session
+        except PyMongoError as e:
+            logger.error(f"Failed to create session: {e}")
+            raise
 
     async def get_session(self, session_id: str, user_id: str) -> Optional[ChatSession]:
-        """Retrieve a specific session"""
-        await self.initialize()
-
-        if not self.container:
-            logger.warning("Cosmos DB not available, returning None")
-            return None
-
+        """Get session by ID and user ID"""
         try:
-            response = await self.container.read_item(
-                item=session_id, partition_key=user_id
-            )
-            return ChatSession(**response)
-        except exceptions.CosmosResourceNotFoundError:
-            logger.info(f"Session {session_id} not found for user {user_id}")
+            doc = self.collection.find_one({"_id": session_id, "user_id": user_id})
+            if doc:
+                return self._from_document(doc)
             return None
-        except Exception as e:
-            logger.error(f"Failed to retrieve session {session_id}: {e}")
-            raise
+        except PyMongoError as e:
+            logger.error(f"Failed to get session {session_id}: {e}")
+            return None
 
     async def update_session(self, session: ChatSession) -> ChatSession:
         """Update an existing session"""
-        await self.initialize()
-
         session.updated_at = datetime.utcnow()
 
-        if self.container:
-            try:
-                await self.container.replace_item(
-                    item=session.id,
-                    body=session.model_dump(),
-                    partition_key=session.user_id,
-                )
-                logger.debug(f"Updated session {session.id}")
-            except Exception as e:
-                logger.error(f"Failed to update session {session.id}: {e}")
-                raise
+        try:
+            document = self._to_document(session)
+            result = self.collection.replace_one(
+                {"_id": session.id, "user_id": session.user_id}, document
+            )
 
-        return session
+            if result.matched_count == 0:
+                raise ValueError(f"Session {session.id} not found or access denied")
 
-    async def add_message_to_session(
+            logger.info(f"Updated session {session.id}")
+            return session
+        except PyMongoError as e:
+            logger.error(f"Failed to update session {session.id}: {e}")
+            raise
+
+    async def add_message(
         self,
         session_id: str,
         user_id: str,
         message: ChatMessage,
         update_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[ChatSession]:
-        """Add a message to a session and update context"""
+        """Add a message to a session"""
         session = await self.get_session(session_id, user_id)
         if not session:
             return None
 
-        # Add message to conversation history
+        # Add message
         session.messages.append(message)
 
-        # Trim messages if over limit
+        # Trim messages if needed
         if len(session.messages) > session.max_messages:
-            # Keep system messages and trim user/assistant pairs
-            system_messages = [msg for msg in session.messages if msg.role == "system"]
-            other_messages = [msg for msg in session.messages if msg.role != "system"]
-
-            # Keep the most recent messages
-            messages_to_keep = session.max_messages - len(system_messages)
-            if messages_to_keep > 0:
-                other_messages = other_messages[-messages_to_keep:]
-
-            session.messages = system_messages + other_messages
+            session.messages = self._trim_messages(
+                session.messages, session.max_messages
+            )
 
         # Update context if provided
         if update_context:
             session.context.update(update_context)
 
-        # Auto-generate title if not set and this is the first user message
+        # Generate title if needed
         if not session.title and message.role == "user":
-            session.title = self._generate_session_title(message.content)
+            session.title = self._generate_title(message.content)
 
+        # Save changes
         return await self.update_session(session)
 
-    async def list_user_sessions(
+    async def list_sessions(
         self,
         user_id: str,
         is_active: Optional[bool] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> List[SessionSummary]:
-        """List sessions for a user with pagination"""
-        await self.initialize()
-
-        if not self.container:
-            logger.warning("Cosmos DB not available, returning empty list")
-            return []
-
-        # Build query
-        query = "SELECT * FROM c WHERE c.user_id = @user_id"
-        parameters = [{"name": "@user_id", "value": user_id}]
-
-        if is_active is not None:
-            query += " AND c.is_active = @is_active"
-            parameters.append({"name": "@is_active", "value": is_active})
-
-        query += " ORDER BY c.updated_at DESC"
-        query += f" OFFSET {offset} LIMIT {limit}"
-
+        """List sessions for a user"""
         try:
-            items = []
-            async for item in self.container.query_items(
-                query=query, parameters=parameters, partition_key=user_id
-            ):
-                session_summary = SessionSummary(
-                    id=item["id"],
-                    user_id=item["user_id"],
-                    title=item.get("title"),
-                    created_at=datetime.fromisoformat(
-                        item["created_at"].replace("Z", "+00:00")
-                    ),
-                    updated_at=datetime.fromisoformat(
-                        item["updated_at"].replace("Z", "+00:00")
-                    ),
-                    message_count=len(item.get("messages", [])),
-                    is_active=item.get("is_active", True),
-                )
-                items.append(session_summary)
+            query = {"user_id": user_id}
+            if is_active is not None:
+                query["is_active"] = is_active
 
-            return items
+            cursor = (
+                self.collection.find(query, {"messages": 0})
+                .sort("updated_at", -1)
+                .skip(offset)
+                .limit(limit)
+            )
 
-        except Exception as e:
+            return [self._to_summary(doc) for doc in cursor]
+        except PyMongoError as e:
             logger.error(f"Failed to list sessions for user {user_id}: {e}")
-            raise
-
-    async def delete_session(self, session_id: str, user_id: str) -> bool:
-        """Delete a session (or mark as inactive)"""
-        await self.initialize()
-
-        session = await self.get_session(session_id, user_id)
-        if not session:
-            return False
-
-        # Mark as inactive instead of deleting for data retention
-        session.is_active = False
-        await self.update_session(session)
-
-        logger.info(f"Marked session {session_id} as inactive")
-        return True
+            return []
 
     async def search_sessions(
         self, search_request: SessionSearchRequest
     ) -> List[SessionSummary]:
-        """Search sessions with advanced filtering"""
-        await self.initialize()
+        """Search sessions based on criteria"""
+        try:
+            query = {"user_id": search_request.user_id}
 
-        if not self.container:
-            logger.warning("Cosmos DB not available, returning empty list")
+            if search_request.is_active is not None:
+                query["is_active"] = search_request.is_active
+
+            if search_request.query:
+                query["$or"] = [
+                    {"title": {"$regex": search_request.query, "$options": "i"}},
+                    {
+                        "messages.content": {
+                            "$regex": search_request.query,
+                            "$options": "i",
+                        }
+                    },
+                ]
+
+            if search_request.start_date:
+                query["created_at"] = {"$gte": search_request.start_date.isoformat()}
+
+            if search_request.end_date:
+                if "created_at" not in query:
+                    query["created_at"] = {}
+                query["created_at"]["$lte"] = search_request.end_date.isoformat()
+
+            cursor = (
+                self.collection.find(query, {"messages": 0})
+                .sort("updated_at", -1)
+                .limit(search_request.limit)
+                .skip(search_request.offset)
+            )
+
+            return [self._to_summary(doc) for doc in cursor]
+        except PyMongoError as e:
+            logger.error(f"Failed to search sessions: {e}")
             return []
 
-        # Build dynamic query
-        query_parts = ["SELECT * FROM c WHERE 1=1"]
-        parameters = []
-
-        if search_request.user_id:
-            query_parts.append("AND c.user_id = @user_id")
-            parameters.append({"name": "@user_id", "value": search_request.user_id})
-
-        if search_request.is_active is not None:
-            query_parts.append("AND c.is_active = @is_active")
-            parameters.append({"name": "@is_active", "value": search_request.is_active})
-
-        if search_request.created_after:
-            query_parts.append("AND c.created_at >= @created_after")
-            parameters.append(
-                {
-                    "name": "@created_after",
-                    "value": search_request.created_after.isoformat(),
-                }
-            )
-
-        if search_request.created_before:
-            query_parts.append("AND c.created_at <= @created_before")
-            parameters.append(
-                {
-                    "name": "@created_before",
-                    "value": search_request.created_before.isoformat(),
-                }
-            )
-
-        query_parts.append("ORDER BY c.updated_at DESC")
-        query_parts.append(
-            f"OFFSET {search_request.offset} LIMIT {search_request.limit}"
-        )
-
-        query = " ".join(query_parts)
-
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """Soft delete a session"""
         try:
-            items = []
-            async for item in self.container.query_items(
-                query=query, parameters=parameters, enable_cross_partition_query=True
-            ):
-                session_summary = SessionSummary(
-                    id=item["id"],
-                    user_id=item["user_id"],
-                    title=item.get("title"),
-                    created_at=datetime.fromisoformat(
-                        item["created_at"].replace("Z", "+00:00")
-                    ),
-                    updated_at=datetime.fromisoformat(
-                        item["updated_at"].replace("Z", "+00:00")
-                    ),
-                    message_count=len(item.get("messages", [])),
-                    is_active=item.get("is_active", True),
-                )
-                items.append(session_summary)
-
-            return items
-
-        except Exception as e:
-            logger.error(f"Failed to search sessions: {e}")
-            raise
-
-    def _generate_session_title(self, first_message: str) -> str:
-        """Generate a session title from the first user message"""
-        # Keep first 50 characters and add ellipsis if longer
-        title = first_message.strip()
-        if len(title) > 50:
-            title = title[:47] + "..."
-        return title
+            result = self.collection.update_one(
+                {"_id": session_id, "user_id": user_id},
+                {
+                    "$set": {
+                        "is_active": False,
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                },
+            )
+            success = result.matched_count > 0
+            if success:
+                logger.info(f"Deleted session {session_id}")
+            return success
+        except PyMongoError as e:
+            logger.error(f"Failed to delete session {session_id}: {e}")
+            return False
 
     async def close(self):
-        """Close the Cosmos DB client connection"""
-        if self.client:
-            await self.client.close()
-            logger.info("Cosmos DB client closed")
+        """Close the database connection"""
+        if self._client:
+            self._client.close()
+            self._client = None
+            self._collection = None
+            logger.info("MongoDB connection closed")
 
 
-# Global service instance
-cosmos_session_service = CosmosSessionService()
+def create_cosmos_service() -> CosmosService:
+    """Factory function to create a CosmosService instance"""
+    # Use MongoDB URL from environment or default for testing
+    mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017/")
+
+    return CosmosService(
+        connection_string=mongodb_url,
+        database_name=settings.cosmos_db_database_name,
+        collection_name=settings.cosmos_db_container_name,
+    )
