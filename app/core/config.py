@@ -1,105 +1,101 @@
 import os
-from typing import List, Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Chat Application"
+    """Application settings loaded from environment variables"""
 
-    # Application settings
-    DEBUG: bool = os.getenv("DEBUG", "0") == "1"
-    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    # App Configuration
+    app_name: str = "HR Chatbot API"
+    debug: bool = False
 
-    # CORS settings
-    CORS_ORIGINS: List[str] = ["*"]
+    # Azure Storage
+    AZURE_STORAGE_CLIENT_ID: Optional[str] = None
+    AZURE_STORAGE_CLIENT_SECRET: Optional[str] = None
+    AZURE_STORAGE_ACCOUNT: str = "stdiagnosticsstorageprod"
+    AZURE_STORAGE_CONTAINER: str = "s-alt-0303-asia-or-us3-dlc13-webintelligentchatbot"
+    DIAGNOSTICS_STORAGE_CONTAINER: Optional[str] = None
 
-    # Static files settings
-    STATIC_DIR: str = "static"
-    CONTENT_DIR: str = "content"
+    # Azure Search
+    AZURE_SEARCH_SERVICE: Optional[str] = None
+    AZURE_SEARCH_INDEX: Optional[str] = None
+    AZURE_SEARCH_CLIENT_ID: Optional[str] = None
+    AZURE_SEARCH_CLIENT_SECRET: Optional[str] = None
+    AZURE_SEARCH_TENANT_ID: Optional[str] = None
 
-    # Azure Storage settings
-    AZURE_STORAGE_ACCOUNT: str = os.getenv("AZURE_STORAGE_ACCOUNT", "")
-    AZURE_STORAGE_CONTAINER: str = os.getenv("AZURE_STORAGE_CONTAINER", "")
-    STORAGE_CONNECTION_STRING: str = os.getenv("STORAGE_CONNECTION_STRING", "")
+    # OpenAI Configuration
+    OPENAI_HOST: str = "azure"
+    AZURE_OPENAI_CHATGPT_MODEL: str = "gpt-4o"
+    AZURE_OPENAI_EMB_MODEL_NAME: str = "text-embedding-ada-002"
+    AZURE_OPENAI_SERVICE: str = "saic-azu-eus2-npd-openaioc-specialservices"
+    AZURE_OPENAI_CHATGPT_DEPLOYMENT: str = "gpt-4o-chatbot-poc"
+    AZURE_OPENAI_EMB_DEPLOYMENT: str = "embeddings"
 
-    # Azure Search settings
-    AZURE_SEARCH_SERVICE: str = os.getenv("AZURE_SEARCH_SERVICE", "")
-    AZURE_SEARCH_INDEX: str = os.getenv("AZURE_SEARCH_INDEX", "")
-    SEARCH_API_KEY: str = os.getenv("SEARCH_API_KEY", "")
-    AZURE_SEARCH_QUERY_LANGUAGE: str = os.getenv("AZURE_SEARCH_QUERY_LANGUAGE", "en-us")
-    AZURE_SEARCH_QUERY_SPELLER: str = os.getenv("AZURE_SEARCH_QUERY_SPELLER", "lexicon")
+    # Secure GPT Configuration
+    SECURE_GPT_DEPLOYMENT_ID: Optional[str] = None
+    SECURE_GPT_EMB_DEPLOYMENT_ID: Optional[str] = None
+    SECURE_GPT_CLIENT_ID: Optional[str] = None
+    SECURE_GPT_CLIENT_SECRET: Optional[str] = None
+    SECURE_GPT_API_VERSION: Optional[str] = None
 
-    # Knowledge Base fields
-    KB_FIELDS_CONTENT: str = os.getenv("KB_FIELDS_CONTENT", "content")
-    KB_FIELDS_SOURCEPAGE: str = os.getenv("KB_FIELDS_SOURCEPAGE", "sourcepage")
+    # APIM Configuration
+    APIM_KEY: Optional[str] = None
+    APIM_ONELOGIN_URL: Optional[str] = None
+    APIM_BASE_URL: Optional[str] = None
 
-    # OpenAI settings
-    OPENAI_HOST: str = os.getenv("OPENAI_HOST", "azure")
-    OPENAI_CHATGPT_MODEL: str = os.getenv("AZURE_OPENAI_CHATGPT_MODEL", "gpt-4o")
-    OPENAI_EMB_MODEL: str = os.getenv(
-        "AZURE_OPENAI_EMB_MODEL", "text-embedding-ada-002"
-    )
+    # Authentication
+    AZURE_USE_AUTHENTICATION: bool = os.getenv("REQUIRE_AUTHENTICATION", "1") != "0"
+    AZURE_SERVER_APP_ID: Optional[str] = None
+    AZURE_SERVER_APP_SECRET: Optional[str] = None
+    AZURE_CLIENT_APP_ID: Optional[str] = None
+    AZURE_TENANT_ID: Optional[str] = None
+    TOKEN_CACHE_PATH: Optional[str] = None
 
-    # Azure OpenAI settings (used when OPENAI_HOST == "azure")
-    AZURE_OPENAI_SERVICE: str = os.getenv("AZURE_OPENAI_SERVICE", "")
-    AZURE_OPENAI_CHATGPT_DEPLOYMENT: str = os.getenv(
-        "AZURE_OPENAI_CHATGPT_DEPLOYMENT", ""
-    )
-    AZURE_OPENAI_EMB_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_EMB_DEPLOYMENT", "")
+    # Additional Authentication variables
+    REQUIRE_AUTHENTICATION: int = 1
+    APP_AUTHENTICATION_CLIENT_ID: Optional[str] = None
 
-    # Non-Azure OpenAI settings (used when OPENAI_HOST != "azure")
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_ORGANIZATION: str = os.getenv("OPENAI_ORGANIZATION", "")
+    # Knowledge Base Fields
+    KB_FIELDS_CONTENT: str = "content"
+    KB_FIELDS_SOURCEPAGE: str = "sourcepage"
 
-    # Authentication settings
-    AZURE_USE_AUTHENTICATION: bool = (
-        os.getenv("AZURE_USE_AUTHENTICATION", "").lower() == "true"
-    )
-    AZURE_SERVER_APP_ID: str = os.getenv("AZURE_SERVER_APP_ID", "")
-    AZURE_SERVER_APP_SECRET: str = os.getenv("AZURE_SERVER_APP_SECRET", "")
-    AZURE_CLIENT_APP_ID: str = os.getenv("AZURE_CLIENT_APP_ID", "")
-    AZURE_TENANT_ID: str = os.getenv("AZURE_TENANT_ID", "")
-    TOKEN_CACHE_PATH: str = os.getenv("TOKEN_CACHE_PATH", "")
+    # Search Configuration
+    AZURE_SEARCH_QUERY_LANGUAGE: str = "en-us"
+    AZURE_SEARCH_QUERY_SPELLER: str = "lexicon"
 
-    # Legacy AUTH_ENABLED for backward compatibility
-    AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "false").lower() == "true"
+    # Legacy API Keys (for fallback)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_ORGANIZATION: Optional[str] = None
+    STORAGE_CONNECTION_STRING: Optional[str] = None
+    SEARCH_API_KEY: Optional[str] = None
 
-    APIM_KEY: str = os.getenv("APIM_KEY", "")
-    APIM_ONELOGIN_URL: str = os.getenv("APIM_ONELOGIN_URL", "")
-    APIM_BASE_URL: str = os.getenv("APIM_BASE_URL", "")
-    SECURE_GPT_API_VERSION: str = os.getenv("SECURE_GPT_API_VERSION", "")
-    AZURE_SEARCH_CLIENT_ID: str = os.getenv("AZURE_SEARCH_CLIENT_ID", "")
-    AZURE_SEARCH_CLIENT_SECRET: str = os.getenv("AZURE_SEARCH_CLIENT_SECRET", "")
-    
-    # JWT Token validation settings
-    JWT_AUDIENCE: str = os.getenv("AUDIENCE", "")
-    JWT_ISSUER: str = os.getenv("ISSUER", "")
-    JWT_ALGORITHMS: List[str] = ["RS256"]  # As seen in screenshot
+    # Application Insights
+    APPLICATIONINSIGHTS_CONNECTION_STRING: Optional[str] = None
 
-    model_config = SettingsConfigDict(
-        case_sensitive=True, env_file=".env", extra="ignore"
-    )
+    # CORS
+    ALLOWED_ORIGIN: Optional[str] = None
 
-    @property
-    def azure_search_endpoint(self) -> str:
-        """Construct Azure Search endpoint URL"""
-        if self.AZURE_SEARCH_SERVICE:
-            return f"https://{self.AZURE_SEARCH_SERVICE}.search.windows.net"
-        return ""
+    # Website Configuration
+    WEBSITE_HOSTNAME: Optional[str] = None
 
-    @property
-    def azure_openai_endpoint(self) -> str:
-        """Construct Azure OpenAI endpoint URL"""
-        if self.AZURE_OPENAI_SERVICE:
-            return f"https://{self.AZURE_OPENAI_SERVICE}.openai.azure.com"
-        return ""
+    # Cosmos DB Configuration
+    cosmos_db_endpoint: Optional[str] = None
+    cosmos_db_key: Optional[str] = None
+    cosmos_db_database_name: str = "hr_chatbot"
+    cosmos_db_container_name: str = "chat_sessions"
+    cosmos_db_partition_key: str = "/user_id"
 
-    @property
-    def azure_storage_account_url(self) -> str:
-        """Construct Azure Storage account URL"""
-        if self.AZURE_STORAGE_ACCOUNT:
-            return f"https://{self.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net"
-        return ""
+    # MongoDB URL for Cosmos/MongoDB compatibility
+    MONGODB_URL: Optional[str] = None
+
+    # Development/Testing
+    USE_MOCK_CLIENTS: bool = os.getenv("USE_MOCK_CLIENTS", "false").lower() == "true"
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
+# Global settings instance
 settings = Settings()

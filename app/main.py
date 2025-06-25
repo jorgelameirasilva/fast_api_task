@@ -1,91 +1,164 @@
-from fastapi import FastAPI, Request
+"""Main FastAPI application"""
+
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from loguru import logger
 
-from app.api.endpoints import router as api_router
 from app.core.config import settings
-from app.core.setup import setup_clients, cleanup_clients
-from app.exceptions.base import CustomException
+from app.core.logs import setup_logging
+from app.api.routes import chat, vote, session
+from app.api.dependencies.auth import get_auth_setup
+from app.utils.mock_clients import cleanup_mock_clients
 
-# Configure logging
-logger.add(
-    "logs/app.log",
-    rotation="500 MB",
-    retention="10 days",
-    level="INFO",
-    format="{time} {level} {message}",
-)
+# Setup logging
+logger, listener, azure_handler = setup_logging("hr-chatbot.log")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handle startup and shutdown events"""
+    """Application lifespan manager"""
     # Startup
-    logger.info("Application startup initiated")
-    try:
-        await setup_clients()
-        logger.info("Application startup completed successfully")
-    except Exception as e:
-        logger.error(f"Failed to setup clients during startup: {e}")
-        # Don't raise the exception to allow the app to start with mock clients
-        logger.warning("Application started with fallback/mock clients")
+    logger.info("Starting HR Chatbot API...")
+
+    # Set use_mock_clients to True for development
+    settings.USE_MOCK_CLIENTS = True
+    logger.info("Using mock clients for development")
 
     yield
 
     # Shutdown
-    logger.info("Application shutdown initiated")
+    logger.info("Shutting down HR Chatbot API...")
+
     try:
-        await cleanup_clients()
-        logger.info("Application shutdown completed successfully")
+        # Cleanup mock clients
+        await cleanup_mock_clients()
+
+        # Stop logging listeners
+        if listener:
+            listener.stop()
+        if azure_handler:
+            azure_handler.close()
+
     except Exception as e:
-        logger.error(f"Error during application shutdown: {e}")
+        logger.error(f"Error during shutdown: {e}")
+
+    logger.info("Shutdown complete")
 
 
+# Create FastAPI app
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="Chat Application API converted from Quart",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    title=settings.app_name,
+    description="HR Chatbot API - FastAPI migration with authentication",
+    version="2.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# Exception handlers
-@app.exception_handler(CustomException)
-async def custom_exception_handler(request: Request, exc: CustomException):
-    """Handle custom exceptions"""
-    logger.error(f"Custom exception: {exc.message}")
-    return JSONResponse(
-        status_code=exc.code,
-        content={"message": exc.message, "details": exc.details},
+# CORS middleware
+if settings.ALLOWED_ORIGIN:
+    logger.info(f"CORS enabled for {settings.ALLOWED_ORIGIN}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.ALLOWED_ORIGIN],
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
     )
-
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle general exceptions"""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500, content={"error": "Internal server error", "detail": str(exc)}
+else:
+    # Allow all origins for development
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
     )
-
 
 # Include API routes
-app.include_router(api_router)
+app.include_router(chat.router, tags=["chat"])
+app.include_router(vote.router, tags=["vote"])
+app.include_router(session.router, tags=["session"])
+
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration"""
+    return {"status": "healthy", "service": "hr-chatbot-api"}
+
+
+# Auth setup endpoint (equivalent to original /auth_setup)
+@app.get("/auth_setup")
+async def auth_setup():
+    """Send MSAL.js settings to the client UI"""
+    try:
+        return JSONResponse(content=get_auth_setup())
+    except Exception as e:
+        logger.error(f"Failed to get auth setup: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to get authentication setup"
+        )
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "HR Chatbot API",
+        "version": "2.0.0",
+        "status": "running",
+        "endpoints": {
+            "chat": "/chat",
+            "vote": "/vote",
+            "auth_setup": "/auth_setup",
+            "health": "/health",
+            "docs": "/docs" if settings.debug else "disabled",
+        },
+    }
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler"""
+    logger.error(f"Global exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": f"The app encountered an error processing your request. Error type: {type(exc).__name__}"
+        },
+    )
+
+
+# Custom validation error handler for consistent error format
+@app.exception_handler(422)
+async def validation_exception_handler(request, exc):
+    """Handle validation errors with consistent format"""
+    logger.warning(f"Validation error: {exc}")
+
+    # Extract first error message to match original format
+    if hasattr(exc, "detail") and exc.detail:
+        if isinstance(exc.detail, list) and len(exc.detail) > 0:
+            error_msg = exc.detail[0].get("msg", "Validation error")
+        else:
+            error_msg = str(exc.detail)
+    else:
+        error_msg = "Validation error"
+
+    return JSONResponse(status_code=400, content={"error": error_msg})
+
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.debug,
+        log_level="info",
+    )

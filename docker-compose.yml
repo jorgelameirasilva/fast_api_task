@@ -1,20 +1,42 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  chat-app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+  mongodb:
+    image: mongo:7.0
+    container_name: test_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: testdb
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - test_network
+    command: mongod --noauth
+
+  app:
+    build: .
+    container_name: test_app
+    depends_on:
+      - mongodb
+    environment:
+      - COSMOS_DB_ENDPOINT=
+      - COSMOS_DB_KEY=
+      - COSMOS_DB_DATABASE_NAME=testdb
+      - COSMOS_DB_CONTAINER_NAME=sessions
+      - REQUIRE_AUTHENTICATION=0
     ports:
       - "8000:8000"
+    networks:
+      - test_network
     volumes:
       - .:/app
-      - ./static:/app/static
-      - ./content:/app/content
-      - ./logs:/app/logs
-    environment:
-      - DEBUG=1
-      - ENVIRONMENT=development
-    env_file:
-      - .env
-    restart: unless-stopped 
+    command: ["python", "-m", "pytest", "tests/", "-v"]
+
+volumes:
+  mongodb_data:
+
+networks:
+  test_network:
+    driver: bridge

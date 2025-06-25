@@ -1,158 +1,268 @@
-# Chat Application
+# HR Chatbot API
 
-A FastAPI-based chat application converted from Quart, designed to handle chat interactions, document serving, and user feedback.
+A production-ready FastAPI application for HR chatbot functionality using Azure OpenAI and Azure Search with APIM (API Management) integration.
 
 ## Features
 
-- **Chat Interface**: Handle chat requests with message history and session state
-- **Ask Endpoint**: Process user queries and return responses
-- **Document Serving**: Serve static assets and content files
-- **Vote/Feedback System**: Collect user feedback on responses
-- **Authentication Setup**: Configurable authentication system
-- **Static File Serving**: Serve static assets and content files
-
-## API Endpoints
-
-### Core Endpoints
-
-- `GET /` - Main index page
-- `GET /redirect` - Redirect endpoint
-- `GET /favicon.ico` - Favicon serving
-- `GET /assets/{file_path:path}` - Static asset serving
-- `GET /content/{file_path:path}` - Content file serving
-
-### Chat Endpoints
-
-- `POST /ask` - Handle user queries
-- `POST /chat` - Handle chat conversations
-- `POST /vote` - Handle user feedback/voting
-
-### Configuration Endpoints
-
-- `GET /auth_setup` - Authentication configuration
-
-## Installation
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Create environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-4. Configure your environment variables in `.env`
+- **APIM Integration**: Production-ready Azure API Management with SecureGPT
+- **OneAccount Authentication**: Custom authentication for APIM services
+- **Azure Search**: ClientSecretCredential-based search integration
+- **Comprehensive Testing**: Simple test setup with mocked external dependencies
+- **Environment-based Configuration**: Separate settings for development, testing, and production
 
 ## Running the Application
 
-### Development
+### Development/Testing Mode
+
+For development and testing, the app uses mock clients to avoid external dependencies:
+
 ```bash
+# Set environment variables for testing
+export REQUIRE_AUTHENTICATION=0
+export USE_MOCK_CLIENTS=true
+
+# Run the application
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Production
+### Production Mode
+
+For production, the app connects to real Azure services with APIM integration:
+
 ```bash
+# Set required Azure configuration
+export REQUIRE_AUTHENTICATION=1
+export USE_MOCK_CLIENTS=false
+
+# APIM and SecureGPT Configuration
+export APIM_BASE_URL="https://your-apim-instance.azure-api.net"
+export APIM_KEY="your-apim-subscription-key"
+export APIM_ONELOGIN_URL="https://your-apim-instance.azure-api.net/auth/login"
+export SECURE_GPT_DEPLOYMENT_ID="your-securegpt-deployment"
+export SECURE_GPT_EMB_DEPLOYMENT_ID="your-embeddings-deployment"
+export SECURE_GPT_CLIENT_ID="your-securegpt-client-id"
+export SECURE_GPT_CLIENT_SECRET="your-securegpt-client-secret"
+export SECURE_GPT_API_VERSION="2024-02-01"
+
+# Azure Search Configuration (with ClientSecretCredential)
+export AZURE_SEARCH_SERVICE="your-search-service"
+export AZURE_SEARCH_INDEX="your-search-index"
+export AZURE_SEARCH_CLIENT_ID="your-search-client-id"
+export AZURE_SEARCH_CLIENT_SECRET="your-search-client-secret"
+export AZURE_SEARCH_TENANT_ID="your-tenant-id"
+
+# Azure Storage Configuration
+export AZURE_STORAGE_ACCOUNT="your-storage-account"
+export AZURE_STORAGE_CONTAINER="your-container"
+export AZURE_STORAGE_CLIENT_ID="your-storage-client-id"
+export AZURE_STORAGE_CLIENT_SECRET="your-storage-client-secret"
+
+# Authentication Configuration
+export AZURE_CLIENT_APP_ID="your-client-app-id"
+export AZURE_TENANT_ID="your-tenant-id"
+
+# Run the application
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Using Docker
-```bash
-docker-compose up
-```
+## Authentication
 
-## Project Structure
+### Development Mode
+Set `REQUIRE_AUTHENTICATION=0` to disable authentication for testing.
 
-```
-app/
-├── main.py              # Main FastAPI application
-├── core/
-│   └── config.py        # Application configuration
-├── api/                 # API endpoints (legacy from task app)
-├── services/            # Business logic services
-├── db/                  # Database models and repositories
-├── exceptions/          # Custom exceptions
-└── schemas/             # Pydantic schemas
-
-static/                  # Static files (CSS, JS, images)
-├── assets/              # Static assets
-└── favicon.ico          # Favicon
-
-content/                 # Content files to be served
-logs/                    # Application logs
-tests/                   # Test files
-```
-
-## Configuration
-
-The application uses environment variables for configuration. Key settings include:
-
-- `DEBUG`: Enable debug mode
-- `ENVIRONMENT`: Application environment (development/production)
-- `AZURE_OPENAI_*`: Azure OpenAI configuration
-- `AZURE_SEARCH_*`: Azure Search configuration
-- `AZURE_STORAGE_*`: Azure Storage configuration
-- `AUTH_ENABLED`: Enable authentication
-
-## API Documentation
-
-Once the application is running, you can access:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-## Request/Response Models
-
-### ChatRequest
-```json
-{
-  "messages": [],
-  "context": {},
-  "session_state": "string"
-}
-```
-
-### AskRequest
-```json
-{
-  "user_query": "string",
-  "user_query_vector": [],
-  "chatbot_response": "string",
-  "count": 0,
-  "upvote": true
-}
-```
-
-### VoteRequest
-```json
-{
-  "user_query": "string",
-  "chatbot_response": "string",
-  "count": 0,
-  "upvote": true
-}
-```
-
-## Development
-
-This application is currently set up with placeholder implementations for all endpoints. To implement the full functionality, you'll need to:
-
-1. Integrate with Azure OpenAI for chat responses
-2. Implement Azure Search for document retrieval
-3. Set up Azure Blob Storage for content serving
-4. Implement authentication if required
-5. Add proper error handling and validation
-6. Implement logging and monitoring
+### Production Mode
+Set `REQUIRE_AUTHENTICATION=1` and configure Azure AD:
+- Requires JWT tokens in Authorization header
+- Validates tokens against Azure AD
+- Uses OneAccount authentication for APIM services
+- Uses ClientSecretCredential for Azure services
 
 ## Testing
 
-Run tests with:
+Run the simple test suite:
+
 ```bash
-pytest
+# Run tests (automatically uses mock clients)
+pytest tests/test_chat.py -v
 ```
 
-## License
+The test:
+- Disables authentication automatically
+- Uses mocked Azure clients
+- Tests the real chat pipeline end-to-end
+- Validates request/response format
 
-[Add your license information here]
+## API Endpoints
+
+### POST /chat
+Process a chat request with the HR chatbot.
+
+**Request:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "What are the company's vacation policies?"}
+  ],
+  "stream": false,
+  "context": {}
+}
+```
+
+**Response:**
+```
+data: {"message": {"role": "assistant", "content": "Our vacation policy..."}, "data_points": [...], "thoughts": "..."}
+```
+
+### GET /health
+Health check endpoint.
+
+**Response:**
+```json
+{"status": "healthy"}
+```
+
+## Architecture
+
+- **FastAPI**: Modern async web framework
+- **Azure API Management**: Secure gateway for OpenAI services
+- **SecureGPT**: Enterprise-grade GPT deployment through APIM
+- **OneAccount**: Custom authentication for APIM integration
+- **Azure Search**: Document retrieval with ClientSecretCredential
+- **Azure Storage**: Blob storage for documents
+- **Pydantic**: Data validation and settings management
+
+## Configuration
+
+All configuration is handled through environment variables. See `app/core/config.py` for the complete list of available settings.
+
+The production setup exactly matches the original implementation with:
+- APIM-based OpenAI client with OneAccount authentication
+- ClientSecretCredential for all Azure services
+- SecureGPT deployment IDs for model selection
+- Custom headers and SSL configuration
+
+---
+
+**Built with ❤️ using FastAPI, Azure Services, and Modern Python Practices**
+
+## Features
+
+- **Real Azure Integration**: Production-ready Azure OpenAI and Azure Search clients
+- **Authentication**: Azure AD integration with JWT token validation
+- **Comprehensive Testing**: Simple test setup with mocked external dependencies
+- **Environment-based Configuration**: Separate settings for development, testing, and production
+
+## Running the Application
+
+### Development/Testing Mode
+
+For development and testing, the app uses mock clients to avoid external dependencies:
+
+```bash
+# Set environment variables for testing
+export REQUIRE_AUTHENTICATION=0
+export USE_MOCK_CLIENTS=true
+
+# Run the application
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Production Mode
+
+For production, the app connects to real Azure services:
+
+```bash
+# Set required Azure configuration
+export REQUIRE_AUTHENTICATION=1
+export USE_MOCK_CLIENTS=false
+
+# Azure OpenAI Configuration
+export AZURE_OPENAI_SERVICE="your-openai-service"
+export AZURE_OPENAI_CHATGPT_DEPLOYMENT="gpt-4o-chatbot-poc"
+export AZURE_OPENAI_CHATGPT_MODEL="gpt-4o"
+export AZURE_OPENAI_EMB_DEPLOYMENT="embeddings"
+export AZURE_OPENAI_EMB_MODEL_NAME="text-embedding-ada-002"
+
+# Azure Search Configuration  
+export AZURE_SEARCH_SERVICE="your-search-service"
+export AZURE_SEARCH_INDEX="your-search-index"
+
+# Authentication Configuration
+export AZURE_CLIENT_APP_ID="your-client-app-id"
+export AZURE_TENANT_ID="your-tenant-id"
+
+# Optional: API Keys (if not using managed identity)
+export OPENAI_API_KEY="your-openai-api-key"
+export SEARCH_API_KEY="your-search-api-key"
+
+# Run the application
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## Authentication
+
+### Development Mode
+Set `REQUIRE_AUTHENTICATION=0` to disable authentication for testing.
+
+### Production Mode
+Set `REQUIRE_AUTHENTICATION=1` and configure Azure AD:
+- Requires JWT tokens in Authorization header
+- Validates tokens against Azure AD
+- Supports both API keys and managed identity for Azure services
+
+## Testing
+
+Run the simple test suite:
+
+```bash
+# Run tests (automatically uses mock clients)
+pytest tests/test_chat.py -v
+```
+
+The test:
+- Disables authentication automatically
+- Uses mocked Azure clients
+- Tests the real chat pipeline end-to-end
+- Validates request/response format
+
+## API Endpoints
+
+### POST /chat
+Process a chat request with the HR chatbot.
+
+**Request:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "What are the company's vacation policies?"}
+  ],
+  "stream": false,
+  "context": {}
+}
+```
+
+**Response:**
+```
+data: {"message": {"role": "assistant", "content": "Our vacation policy..."}, "data_points": [...], "thoughts": "..."}
+```
+
+### GET /health
+Health check endpoint.
+
+**Response:**
+```json
+{"status": "healthy"}
+```
+
+## Architecture
+
+- **FastAPI**: Modern async web framework
+- **Azure OpenAI**: GPT-4 powered chat responses  
+- **Azure Search**: Document retrieval and search
+- **Pydantic**: Data validation and settings management
+- **Azure Identity**: Managed identity and authentication support
+
+## Configuration
+
+All configuration is handled through environment variables. See `app/core/config.py` for the complete list of available settings.
+

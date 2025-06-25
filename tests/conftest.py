@@ -1,264 +1,79 @@
+"""Test configuration and fixtures"""
+
+import os
 import pytest
-from typing import Generator
-from unittest.mock import Mock, AsyncMock, patch
-from datetime import datetime
-
+from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
+
+# Set environment variables BEFORE importing app
+os.environ["REQUIRE_AUTHENTICATION"] = "0"
+os.environ["USE_MOCK_CLIENTS"] = "true"
+
 from app.main import app
-from app.schemas.chat import ChatMessage, ChatRequest, AskRequest, VoteRequest
-from app.auth.models import AuthUser
-from app.services import (
-    ChatService,
-    AskService,
-    VoteService,
-    AuthService,
-    SessionService,
-    ResponseGenerator,
-)
 
 
-@pytest.fixture(scope="function")
-def client() -> Generator:
-    """
-    Create a test client for the FastAPI application.
-    """
-    with TestClient(app) as client:
-        yield client
+@pytest.fixture(autouse=True)
+def mock_model_validation():
+    """Mock model validation to prevent model name errors"""
+    with patch("app.core.modelhelper.get_oai_chatmodel_tiktoken", return_value="gpt-4"):
+        yield
 
 
-# Service Fixtures
-@pytest.fixture
-def chat_service():
-    """Create a fresh ChatService instance for testing."""
-    return ChatService()
+@pytest.fixture(autouse=True)
+def mock_openai_client():
+    """Mock OpenAI client to return a simple response"""
+    mock_client = AsyncMock()
 
-
-@pytest.fixture
-def ask_service():
-    """Create a fresh AskService instance for testing."""
-    return AskService()
-
-
-@pytest.fixture
-def vote_service():
-    """Create a fresh VoteService instance for testing."""
-    return VoteService()
-
-
-@pytest.fixture
-def auth_service():
-    """Create a fresh AuthService instance for testing."""
-    return AuthService()
-
-
-@pytest.fixture
-def session_service():
-    """Create a fresh SessionService instance for testing."""
-    return SessionService()
-
-
-@pytest.fixture
-def response_generator():
-    """Create a fresh ResponseGenerator instance for testing."""
-    return ResponseGenerator()
-
-
-# Authentication Fixtures
-@pytest.fixture
-def test_user():
-    """Create a test user for authentication testing."""
-    return AuthUser(
-        sub="test-user-123",
-        email="test@example.com",
-        name="Test User",
-        preferred_username="testuser",
-        roles=["user"],
-        scope="read write",
+    # Mock chat completion response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = (
+        "This is a test response about vacation policies. You get 15 days of PTO annually."
     )
+    mock_response.choices[0].message.role = "assistant"
+
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch(
+        "app.utils.mock_clients.get_mock_openai_client", return_value=mock_client
+    ):
+        yield mock_client
 
 
-@pytest.fixture
-def admin_user():
-    """Create an admin user for testing."""
-    return AuthUser(
-        sub="admin-user-456",
-        email="admin@example.com",
-        name="Admin User",
-        preferred_username="adminuser",
-        roles=["admin", "user"],
-        scope="read write delete admin",
-    )
+@pytest.fixture(autouse=True)
+def mock_search_client():
+    """Mock search client to return simple search results"""
+    mock_client = AsyncMock()
 
-
-@pytest.fixture
-def mock_get_current_user(test_user):
-    """Mock the get_current_user dependency to return test user."""
-    with patch("app.auth.dependencies.get_current_user") as mock:
-        mock.return_value = test_user
-        yield mock
-
-
-@pytest.fixture
-def mock_jwt_authenticator():
-    """Mock JWT authenticator for testing."""
-    with patch("app.auth.jwt.get_jwt_authenticator") as mock:
-        mock_auth = Mock()
-        mock_auth.validate_and_extract_user.return_value = AuthUser(
-            sub="test-user-123", email="test@example.com"
-        )
-        mock.return_value = mock_auth
-        yield mock_auth
-
-
-@pytest.fixture
-def auth_headers():
-    """Create auth headers with a test JWT token."""
-    return {"Authorization": "Bearer test-jwt-token"}
-
-
-@pytest.fixture
-def authenticated_client(client, mock_get_current_user):
-    """Create an authenticated test client."""
-    return client
-
-
-# Mock Fixtures
-@pytest.fixture
-def mock_approach():
-    """Create a mock approach for testing."""
-    mock = Mock()
-    mock.name = "TestApproach"
-    mock.run = AsyncMock(
-        return_value={
-            "content": "Test response content",
-            "sources": [{"title": "Test Source", "url": "/test.pdf"}],
-            "context": {"test_key": "test_value"},
+    # Mock search results
+    mock_results = [
+        {
+            "content": "Vacation policy: Employees get 15 days of PTO annually.",
+            "sourcepage": "hr-policy.pdf",
         }
-    )
-    return mock
-
-
-@pytest.fixture
-def mock_session_service():
-    """Create a mock SessionService for testing."""
-    mock = AsyncMock(spec=SessionService)
-    mock.update_session = AsyncMock()
-    mock.get_session = AsyncMock(return_value={})
-    mock.delete_session = AsyncMock(return_value=True)
-    return mock
-
-
-@pytest.fixture
-def mock_response_generator():
-    """Create a mock ResponseGenerator for testing."""
-    mock = AsyncMock(spec=ResponseGenerator)
-    mock.generate_chat_response = AsyncMock(return_value="Mock chat response")
-    mock.generate_ask_response = AsyncMock(return_value="Mock ask response")
-    mock.get_relevant_sources = AsyncMock(return_value=[])
-    return mock
-
-
-# Data Fixtures
-@pytest.fixture
-def sample_chat_message():
-    """Create a sample ChatMessage for testing."""
-    return ChatMessage(
-        role="user", content="Hello, how are you?", timestamp=datetime.now()
-    )
-
-
-@pytest.fixture
-def sample_chat_request(sample_chat_message):
-    """Create a sample ChatRequest for testing."""
-    return ChatRequest(
-        messages=[sample_chat_message],
-        session_state="test-session-123",
-        context={"test": "context"},
-    )
-
-
-@pytest.fixture
-def sample_ask_request():
-    """Create a sample AskRequest for testing."""
-    return AskRequest(
-        user_query="What is artificial intelligence?",
-        chatbot_response="AI is a field of computer science...",
-        count=1,
-        upvote=True,
-    )
-
-
-@pytest.fixture
-def sample_vote_request():
-    """Create a sample VoteRequest for testing."""
-    return VoteRequest(
-        user_query="Test query",
-        chatbot_response="Test response",
-        upvote=True,
-        count=1,
-        reason_multiple_choice="helpful",
-        additional_comments="Great response!",
-    )
-
-
-@pytest.fixture
-def multi_turn_conversation():
-    """Create a multi-turn conversation for testing."""
-    return [
-        ChatMessage(role="user", content="What is AI?"),
-        ChatMessage(role="assistant", content="AI is artificial intelligence..."),
-        ChatMessage(role="user", content="Can you give examples?"),
-        ChatMessage(role="assistant", content="Sure, examples include..."),
-        ChatMessage(role="user", content="How does machine learning relate?"),
     ]
 
+    mock_client.search.return_value = mock_results
 
-# Test Data Collections
+    with patch(
+        "app.utils.mock_clients.get_mock_search_client", return_value=mock_client
+    ):
+        yield mock_client
+
+
 @pytest.fixture
-def test_queries():
-    """Provide various test queries for comprehensive testing."""
+def client():
+    """Create test client"""
+    return TestClient(app)
+
+
+@pytest.fixture
+def sample_chat_request():
+    """Sample chat request for testing"""
     return {
-        "simple": "Hello",
-        "question": "What is the capital of France?",
-        "complex": "Can you explain the relationship between quantum computing and artificial intelligence?",
-        "conversational": "Thanks for that explanation, can you tell me more?",
-        "empty": "",
-        "long": "A" * 1000,
-        "special_chars": "What about émojis 🤖 and spëcial cháracters?",
+        "messages": [
+            {"role": "user", "content": "What are the company's vacation policies?"}
+        ],
+        "stream": False,
+        "context": {},
     }
-
-
-@pytest.fixture
-def test_session_ids():
-    """Provide various session IDs for testing."""
-    return [
-        "session-123",
-        "user-456-session",
-        "temp-session-789",
-        "long-session-id-with-many-characters-12345",
-        "",
-    ]
-
-
-# Error Scenarios
-@pytest.fixture
-def failing_approach():
-    """Create a mock approach that fails for error testing."""
-    mock = Mock()
-    mock.name = "FailingApproach"
-    mock.run = AsyncMock(side_effect=Exception("Approach execution failed"))
-    return mock
-
-
-@pytest.fixture
-def streaming_approach():
-    """Create a mock approach that returns streaming results."""
-    mock = Mock()
-    mock.name = "StreamingApproach"
-
-    async def mock_stream():
-        yield {"partial": "content"}
-        yield {"content": "Final streaming content", "sources": []}
-
-    mock.run = AsyncMock(return_value=mock_stream())
-    return mock
