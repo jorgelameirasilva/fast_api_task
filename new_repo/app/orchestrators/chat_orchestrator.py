@@ -5,10 +5,10 @@ Single Responsibility: Coordinates between services and handles response formatt
 
 import logging
 import json
-from typing import Any
+from typing import Any, Dict
 from fastapi.responses import StreamingResponse
 
-from app.models.chat import ChatRequest
+from app.schemas.chat import ChatRequest
 from app.services.chat_service import chat_service
 from app.services.session_manager import SessionManager
 from app.utils import make_json_serializable
@@ -52,7 +52,17 @@ class ChatOrchestrator:
         self, request: ChatRequest, current_user: dict[str, Any]
     ) -> dict[str, Any]:
         """Prepare context for chat processing"""
-        context = request.context.copy() if request.context else {}
+        # Handle both dict and Pydantic model contexts
+        if hasattr(request.context, "model_copy"):
+            # It's a Pydantic model
+            context = request.context.model_copy() if request.context else {}
+        elif hasattr(request.context, "copy"):
+            # It's a regular dict
+            context = request.context.copy() if request.context else {}
+        else:
+            # Fallback
+            context = dict(request.context) if request.context else {}
+
         context["auth_claims"] = current_user
         return context
 

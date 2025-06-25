@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting HR Chatbot API...")
 
     # Set use_mock_clients to True for development
-    settings.use_mock_clients = True
+    settings.USE_MOCK_CLIENTS = True
     logger.info("Using mock clients for development")
 
     yield
@@ -58,11 +58,11 @@ app = FastAPI(
 )
 
 # CORS middleware
-if settings.allowed_origin:
-    logger.info(f"CORS enabled for {settings.allowed_origin}")
+if settings.ALLOWED_ORIGIN:
+    logger.info(f"CORS enabled for {settings.ALLOWED_ORIGIN}")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.allowed_origin],
+        allow_origins=[settings.ALLOWED_ORIGIN],
         allow_credentials=True,
         allow_methods=["GET", "POST"],
         allow_headers=["*"],

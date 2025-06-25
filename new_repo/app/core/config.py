@@ -11,65 +11,73 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Azure Storage
-    azure_storage_account: str = "stdiagnosticsstorageprod"
-    azure_storage_container: str = "s-alt-0303-asia-or-us3-dlc13-webintelligentchatbot"
-    azure_storage_client_id: Optional[str] = None
-    azure_storage_client_secret: Optional[str] = None
+    AZURE_STORAGE_CLIENT_ID: Optional[str] = None
+    AZURE_STORAGE_CLIENT_SECRET: Optional[str] = None
+    AZURE_STORAGE_ACCOUNT: str = "stdiagnosticsstorageprod"
+    AZURE_STORAGE_CONTAINER: str = "s-alt-0303-asia-or-us3-dlc13-webintelligentchatbot"
+    DIAGNOSTICS_STORAGE_CONTAINER: Optional[str] = None
 
     # Azure Search
-    azure_search_service: Optional[str] = None
-    azure_search_index: Optional[str] = None
-    azure_search_client_id: Optional[str] = None
-    azure_search_client_secret: Optional[str] = None
-    azure_search_tenant_id: Optional[str] = None
+    AZURE_SEARCH_SERVICE: Optional[str] = None
+    AZURE_SEARCH_INDEX: Optional[str] = None
+    AZURE_SEARCH_CLIENT_ID: Optional[str] = None
+    AZURE_SEARCH_CLIENT_SECRET: Optional[str] = None
+    AZURE_SEARCH_TENANT_ID: Optional[str] = None
 
     # OpenAI Configuration
-    openai_host: str = "azure"
-    azure_openai_chatgpt_model: str = "gpt-40"
-    azure_openai_emb_model_name: str = "text-embedding-ada-002"
-    azure_openai_service: str = "saic-azu-eus2-npd-openaioc-specialservices"
-    azure_openai_chatgpt_deployment: str = "gpt-4o-chatbot-poc"
-    azure_openai_emb_deployment: str = "embeddings"
+    OPENAI_HOST: str = "azure"
+    AZURE_OPENAI_CHATGPT_MODEL: str = "gpt-4o"
+    AZURE_OPENAI_EMB_MODEL_NAME: str = "text-embedding-ada-002"
+    AZURE_OPENAI_SERVICE: str = "saic-azu-eus2-npd-openaioc-specialservices"
+    AZURE_OPENAI_CHATGPT_DEPLOYMENT: str = "gpt-4o-chatbot-poc"
+    AZURE_OPENAI_EMB_DEPLOYMENT: str = "embeddings"
 
     # Secure GPT Configuration
-    secure_gpt_deployment_id: Optional[str] = None
-    secure_gpt_emb_deployment_id: Optional[str] = None
-    secure_gpt_client_id: Optional[str] = None
-    secure_gpt_client_secret: Optional[str] = None
-    secure_gpt_api_version: Optional[str] = None
+    SECURE_GPT_DEPLOYMENT_ID: Optional[str] = None
+    SECURE_GPT_EMB_DEPLOYMENT_ID: Optional[str] = None
+    SECURE_GPT_CLIENT_ID: Optional[str] = None
+    SECURE_GPT_CLIENT_SECRET: Optional[str] = None
+    SECURE_GPT_API_VERSION: Optional[str] = None
 
     # APIM Configuration
-    apim_key: Optional[str] = None
-    apim_onelogin_url: Optional[str] = None
-    apim_base_url: Optional[str] = None
+    APIM_KEY: Optional[str] = None
+    APIM_ONELOGIN_URL: Optional[str] = None
+    APIM_BASE_URL: Optional[str] = None
 
     # Authentication
-    azure_use_authentication: bool = True
-    azure_server_app_id: Optional[str] = None
-    azure_server_app_secret: Optional[str] = None
-    azure_client_app_id: Optional[str] = None
-    azure_tenant_id: Optional[str] = None
-    token_cache_path: Optional[str] = None
+    AZURE_USE_AUTHENTICATION: bool = os.getenv("REQUIRE_AUTHENTICATION", "1") != "0"
+    AZURE_SERVER_APP_ID: Optional[str] = None
+    AZURE_SERVER_APP_SECRET: Optional[str] = None
+    AZURE_CLIENT_APP_ID: Optional[str] = None
+    AZURE_TENANT_ID: Optional[str] = None
+    TOKEN_CACHE_PATH: Optional[str] = None
+
+    # Additional Authentication variables
+    REQUIRE_AUTHENTICATION: int = 1
+    APP_AUTHENTICATION_CLIENT_ID: Optional[str] = None
 
     # Knowledge Base Fields
-    kb_fields_content: str = "content"
-    kb_fields_sourcepage: str = "sourcepage"
+    KB_FIELDS_CONTENT: str = "content"
+    KB_FIELDS_SOURCEPAGE: str = "sourcepage"
 
     # Search Configuration
-    azure_search_query_language: str = "en-us"
-    azure_search_query_speller: str = "lexicon"
+    AZURE_SEARCH_QUERY_LANGUAGE: str = "en-us"
+    AZURE_SEARCH_QUERY_SPELLER: str = "lexicon"
 
     # Legacy API Keys (for fallback)
-    openai_api_key: Optional[str] = None
-    openai_organization: Optional[str] = None
-    storage_connection_string: Optional[str] = None
-    search_api_key: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_ORGANIZATION: Optional[str] = None
+    STORAGE_CONNECTION_STRING: Optional[str] = None
+    SEARCH_API_KEY: Optional[str] = None
 
     # Application Insights
-    applicationinsights_connection_string: Optional[str] = None
+    APPLICATIONINSIGHTS_CONNECTION_STRING: Optional[str] = None
 
     # CORS
-    allowed_origin: Optional[str] = None
+    ALLOWED_ORIGIN: Optional[str] = None
+
+    # Website Configuration
+    WEBSITE_HOSTNAME: Optional[str] = None
 
     # Cosmos DB Configuration
     cosmos_db_endpoint: Optional[str] = None
@@ -78,12 +86,15 @@ class Settings(BaseSettings):
     cosmos_db_container_name: str = "chat_sessions"
     cosmos_db_partition_key: str = "/user_id"
 
+    # MongoDB URL for Cosmos/MongoDB compatibility
+    MONGODB_URL: Optional[str] = None
+
     # Development/Testing
-    use_mock_clients: bool = os.getenv("USE_MOCK_CLIENTS", "false").lower() == "true"
+    USE_MOCK_CLIENTS: bool = os.getenv("USE_MOCK_CLIENTS", "false").lower() == "true"
 
     class Config:
         env_file = ".env"
-        case_sensitive = False
+        case_sensitive = True
 
 
 # Global settings instance

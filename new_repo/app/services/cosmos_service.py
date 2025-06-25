@@ -292,8 +292,10 @@ class CosmosService:
 
 def create_cosmos_service() -> CosmosService:
     """Factory function to create a CosmosService instance"""
-    # Use MongoDB URL from environment or default for testing
-    mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017/")
+    from app.core.config import settings
+
+    # Use MongoDB URL from config or default for testing
+    mongodb_url = settings.MONGODB_URL or "mongodb://localhost:27017/"
 
     return CosmosService(
         connection_string=mongodb_url,

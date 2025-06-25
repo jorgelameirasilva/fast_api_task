@@ -2,59 +2,78 @@
 
 import os
 import pytest
-import pytest_asyncio
+from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
 
 # Set environment variables BEFORE importing app
 os.environ["REQUIRE_AUTHENTICATION"] = "0"
 os.environ["USE_MOCK_CLIENTS"] = "true"
 
 from app.main import app
-from app.core.config import settings
 
 
-@pytest.fixture(scope="session")
-def test_app():
-    """Create test FastAPI app"""
-    # Override settings for testing
-    settings.use_mock_clients = True
-    settings.debug = True
-
-    return app
+@pytest.fixture(autouse=True)
+def mock_model_validation():
+    """Mock model validation to prevent model name errors"""
+    with patch("app.core.modelhelper.get_oai_chatmodel_tiktoken", return_value="gpt-4"):
+        yield
 
 
-@pytest.fixture(scope="session")
-def client(test_app):
+@pytest.fixture(autouse=True)
+def mock_openai_client():
+    """Mock OpenAI client to return a simple response"""
+    mock_client = AsyncMock()
+
+    # Mock chat completion response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = (
+        "This is a test response about vacation policies. You get 15 days of PTO annually."
+    )
+    mock_response.choices[0].message.role = "assistant"
+
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch(
+        "app.utils.mock_clients.get_mock_openai_client", return_value=mock_client
+    ):
+        yield mock_client
+
+
+@pytest.fixture(autouse=True)
+def mock_search_client():
+    """Mock search client to return simple search results"""
+    mock_client = AsyncMock()
+
+    # Mock search results
+    mock_results = [
+        {
+            "content": "Vacation policy: Employees get 15 days of PTO annually.",
+            "sourcepage": "hr-policy.pdf",
+        }
+    ]
+
+    mock_client.search.return_value = mock_results
+
+    with patch(
+        "app.utils.mock_clients.get_mock_search_client", return_value=mock_client
+    ):
+        yield mock_client
+
+
+@pytest.fixture
+def client():
     """Create test client"""
-    return TestClient(test_app)
-
-
-@pytest_asyncio.fixture
-async def async_client(test_app):
-    """Create async test client"""
-    async with AsyncClient(app=test_app, base_url="http://testserver") as ac:
-        yield ac
+    return TestClient(app)
 
 
 @pytest.fixture
 def sample_chat_request():
-    """Sample chat request for testing with new ChatRequest format"""
+    """Sample chat request for testing"""
     return {
-        "messages": [{"role": "user", "content": "How do I report an illness?"}],
-        "context": {},
+        "messages": [
+            {"role": "user", "content": "What are the company's vacation policies?"}
+        ],
         "stream": False,
-        "session_state": None,  # New session
-    }
-
-
-@pytest.fixture
-def sample_vote_request():
-    """Sample vote request for testing"""
-    return {
-        "user_query": "How do I report an illness?",
-        "chatbot_response": "To report an illness, follow these steps:",
-        "upvote": 1,
-        "downvote": 0,
-        "count": 1,
+        "context": {},
     }

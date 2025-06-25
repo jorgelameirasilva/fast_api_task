@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.api.dependencies.auth import get_current_user
-from app.models.chat import ChatRequest
+from app.schemas.chat import ChatRequest
 from app.orchestrators.chat_orchestrator import chat_orchestrator
 
 logger = logging.getLogger(__name__)

@@ -19,6 +19,7 @@ from msal_extensions import (
 import jwt
 from jwt import PyJWTError, PyJWKClient
 from fastapi import Request, HTTPException
+from .config import settings
 
 
 class AuthError(Exception):
@@ -42,10 +43,8 @@ def token_required(f):
         if not request:
             raise HTTPException(status_code=500, detail="Request object not found")
 
-        REQUIRE_AUTHENTICATION = int(os.environ.get("REQUIRE_AUTHENTICATION", 1))
-
-        if REQUIRE_AUTHENTICATION:
-            AUDIENCE = os.environ.get("APP_AUTHENTICATION_CLIENT_ID", None)
+        if settings.AZURE_USE_AUTHENTICATION:
+            AUDIENCE = settings.AZURE_CLIENT_APP_ID
             ISSUER = "https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/v2.0"
             JWKS_URL = f"https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/discovery/v2.0/keys"
 
@@ -200,7 +199,7 @@ class AuthenticationHelper:
                     "code": "authorization_header_missing",
                     "description": "Authorization header is expected",
                 },
-                401,
+                status_code=401,
             )
 
         parts = auth.split()
@@ -211,12 +210,13 @@ class AuthenticationHelper:
                     "code": "invalid_header",
                     "description": "Authorization header must start with Bearer",
                 },
-                401,
+                status_code=401,
             )
 
         elif len(parts) == 1:
             raise AuthError(
-                {"code": "invalid_header", "description": "Token not found"}, 401
+                {"code": "invalid_header", "description": "Token not found"},
+                status_code=401,
             )
 
         elif len(parts) > 2:
@@ -225,7 +225,7 @@ class AuthenticationHelper:
                     "code": "invalid_header",
                     "description": "Authorization header must be a bearer token",
                 },
-                401,
+                status_code=401,
             )
 
         token = parts[1]
@@ -236,119 +236,99 @@ class AuthenticationHelper:
         overrides: dict[str, Any], auth_claims: dict[str, Any]
     ) -> Optional[str]:
         """
-        Build different permutations of the oid or groups security filter
-        https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search
-        https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search-with-aad
+        Build security filters for search queries based on auth claims.
         """
-        use_oid_security_filter = overrides.get("use_oid_security_filter")
-        use_groups_security_filter = overrides.get("use_groups_security_filter")
-
-        oid_security_filter = (
-            "oid eq '{}'".format(auth_claims.get("oid") or "")
-            if use_oid_security_filter
-            else None
-        )
-
-        groups_security_filter = None
-        if use_groups_security_filter:
-            groups = auth_claims.get("groups") or []
-            if groups:
-                groups_filter_parts = [f'search.ismatch("{group}")' for group in groups]
-                groups_security_filter = " or ".join(groups_filter_parts)
-
-        # If only one security filter is specified, return that filter
-        # If both security filters are specified, combine them with "or" as only 1 security filter needs to pass
-        # If no security filters are specified, don't return any filter
-        if oid_security_filter and not groups_security_filter:
-            return oid_security_filter
-        elif not oid_security_filter and groups_security_filter:
-            return groups_security_filter
-        elif oid_security_filter and groups_security_filter:
-            return f"({oid_security_filter}) or ({groups_security_filter})"
-        else:
+        if not auth_claims:
             return None
+
+        groups = auth_claims.get("groups", [])
+        if not groups:
+            return None
+
+        if overrides.get("use_oid_security_filter"):
+            return f"oid eq '{auth_claims.get('oid')}'"
+
+        if overrides.get("use_groups_security_filter"):
+            groups_filter_list = [
+                f"groups/any(g:search.in(g, '{group}'))" for group in groups
+            ]
+            return f"({' or '.join(groups_filter_list)})"
+
+        return None
 
     @staticmethod
     async def list_groups(graph_resource_access_token: dict) -> list[str]:
-        headers = {
-            "Authorization": "Bearer " + graph_resource_access_token["access_token"]
-        }
+        """
+        Get list of groups from Microsoft Graph API.
+        """
         groups = []
-        async with aiohttp.ClientSession(headers=headers) as session:
-            resp_json = None
-            resp_status = None
-            async with session.get(
-                url="https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$select=id"
-            ) as resp:
-                resp_json = await resp.json()
-                resp_status = resp.status
-                if resp_status != 200:
-                    raise AuthError(
-                        error=json.dumps(resp_json), status_code=resp_status
-                    )
+        graph_url = "https://graph.microsoft.com/v1.0/me/transitiveMemberOf/microsoft.graph.group?$select=id"
 
-            while resp_status == 200:
-                value = resp_json["value"]
-                for group in value:
-                    groups.append(group["id"])
-                next_link = resp_json.get("@odata.nextLink")
-                if next_link:
-                    async with session.get(url=next_link) as resp:
-                        resp_json = await resp.json()
-                        resp_status = resp.status
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"Bearer {graph_resource_access_token['access_token']}",
+                "ConsistencyLevel": "eventual",
+            }
+            async with session.get(graph_url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for group in data.get("value", []):
+                        groups.append(group["id"])
+
+                    # Handle pagination
+                    while "@odata.nextLink" in data:
+                        async with session.get(
+                            data["@odata.nextLink"], headers=headers
+                        ) as next_resp:
+                            if next_resp.status == 200:
+                                data = await next_resp.json()
+                                for group in data.get("value", []):
+                                    groups.append(group["id"])
+                            else:
+                                break
                 else:
-                    break
-            if resp_status != 200:
-                raise AuthError(error=json.dumps(resp_json), status_code=resp_status)
+                    logging.warning(
+                        f"Failed to get groups from Graph API: {resp.status}"
+                    )
 
         return groups
 
     async def get_auth_claims_if_enabled(self, headers: dict) -> dict[str, Any]:
+        """
+        Get authentication claims if authentication is enabled.
+        """
         if not self.use_authentication:
             return {}
 
         try:
-            # Read the authentication token from the authorization header and
-            # The scope is set to the Microsoft Graph API, which may need to be
-            # https://learn.microsoft.com/en-us/azure/active-directory/develop/
-            auth_token = AuthenticationHelper.get_token_auth_header(headers)
+            access_token = self.get_token_auth_header(headers)
             graph_resource_access_token = (
                 self.confidential_client.acquire_token_on_behalf_of(
-                    user_assertion=auth_token,
-                    scopes=["https://graph.microsoft.com/.default"],
+                    user_assertion=access_token, scopes=[self.scope]
                 )
             )
 
             if "error" in graph_resource_access_token:
-                raise AuthError(error=str(graph_resource_access_token), status_code=401)
+                logging.error(
+                    f"Error acquiring token: {graph_resource_access_token['error']}"
+                )
+                return {}
 
-            # Read the claims from the response. The oid and groups claims are
-            # https://learn.microsoft.com/en-us/azure/active-directory/develop/id-token-claims
-            id_token_claims = graph_resource_access_token.get("id_token_claims", {})
-            auth_claims = {
-                "oid": id_token_claims.get("oid"),
-                "groups": id_token_claims.get("groups") or [],
+            # Get user groups
+            groups = await self.list_groups(graph_resource_access_token)
+
+            # Decode the access token to get user claims
+            decoded_token = jwt.decode(
+                access_token, options={"verify_signature": False}
+            )
+
+            return {
+                "oid": decoded_token.get("oid"),
+                "groups": groups,
+                "name": decoded_token.get("name"),
+                # Add other claims as needed
             }
 
-            # A groups claim may have been omitted either because it was not
-            # or a groups overage claim may have been emitted.
-            # https://learn.microsoft.com/en-us/azure/active-directory/develop/id-token-claims
-            missing_groups_claim = "groups" not in id_token_claims
-            has_group_overage_claim = any(
-                ("groups" in key) and (value is not None)
-                for key, value in id_token_claims.items()
-            )
-            if missing_groups_claim or has_group_overage_claim:
-                # Read the user's groups from Microsoft Graph
-                auth_claims["groups"] = await AuthenticationHelper.list_groups(
-                    graph_resource_access_token
-                )
-
-            return auth_claims
-        except AuthError as e:
-            print(e.error)
-            logging.exception("Exception getting authorization information")
-            return {}
-        except Exception:
-            logging.exception("Exception getting authorization information")
+        except Exception as e:
+            logging.exception(f"Error getting auth claims: {e}")
             return {}

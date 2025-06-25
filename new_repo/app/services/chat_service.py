@@ -3,99 +3,58 @@ Chat Service - Handles chat business logic following SOLID principles
 Single Responsibility: Manage chat approach and process chat requests
 """
 
-import logging
 from typing import Any
-from collections.abc import AsyncGenerator
+from loguru import logger
 
-from app.core.config import settings
-from app.utils.mock_clients import (
-    get_mock_search_client,
-    get_mock_openai_client,
+from app.schemas.chat import (
+    ChatRequest,
+    ChatResponse,
 )
-
-logger = logging.getLogger(__name__)
+from app.core.setup import get_chat_approach
 
 
 class ChatService:
-    """
-    Chat service following SOLID principles
-    Single Responsibility: Manage chat approach and process requests
-    """
+    """Service focused solely on chat operations"""
 
-    def __init__(self):
-        self.approach = None
-        self._setup_approach()
-
-    def _setup_approach(self):
-        """Setup the chat approach with appropriate clients"""
-        try:
-            # Get clients based on configuration
-            search_client, openai_client = self._get_clients()
-
-            # Initialize approach
-            self.approach = self._create_approach(search_client, openai_client)
-
-            logger.info("Chat approach initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to setup chat approach: {str(e)}")
-            raise
-
-    def _get_clients(self):
-        """Get appropriate clients based on configuration"""
-        if settings.use_mock_clients or settings.debug:
-            return get_mock_search_client(), get_mock_openai_client()
-        else:
-            raise NotImplementedError(
-                "Production clients not implemented yet - use mock clients"
-            )
-
-    def _create_approach(self, search_client, openai_client):
-        """Create and configure the chat approach"""
-        from app.approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
-
-        return ChatReadRetrieveReadApproach(
-            search_client=search_client,
-            openai_client=openai_client,
-            chatgpt_model=settings.secure_gpt_deployment_id
-            or settings.azure_openai_chatgpt_model
-            or "gpt-4o",
-            chatgpt_deployment=settings.azure_openai_chatgpt_deployment,
-            embedding_model=settings.secure_gpt_emb_deployment_id
-            or settings.azure_openai_emb_model_name
-            or "text-embedding-ada-002",
-            embedding_deployment=settings.azure_openai_emb_deployment,
-            sourcepage_field=settings.kb_fields_sourcepage,
-            content_field=settings.kb_fields_content,
-            query_language=settings.azure_search_query_language,
-            query_speller=settings.azure_search_query_speller,
-        )
+    def __init__(
+        self,
+    ):
+        self.session_storage: dict[str, Any] = {}
 
     async def process_chat(
-        self, request, context: dict[str, Any]
-    ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
-        """
-        Process chat request using the configured approach
-        Returns either a dict (non-streaming) or AsyncGenerator (streaming)
-        """
-        if not self.approach:
-            raise Exception("Chat approach not initialized")
+        self, request: ChatRequest, context: dict[str, Any]
+    ) -> ChatResponse:
+        """Process a chat request using approaches as primary method"""
+        logger.info(f"Processing chat with {len(request.messages)} messages")
 
-        # Convert request to approach format
-        messages = self._convert_messages(request.messages)
+        try:
+            chat_approach = get_chat_approach()
+            if not chat_approach:
+                raise ValueError("No chat approach configured")
 
-        # Call approach
-        return await self.approach.run(
-            messages,
-            stream=request.stream,
-            context=context,
-            session_state=request.session_state,
-        )
+            session_state = None
 
-    def _convert_messages(self, messages):
-        """Convert request messages to approach format"""
-        return [{"role": msg.role, "content": msg.content} for msg in messages]
+            if hasattr(request, "session_state") and request.session_state:
+                session_state = request.session_state
+
+            # Convert ChatMessage objects to dictionaries for the approach
+            messages_dict = [
+                {"role": msg.role, "content": msg.content} for msg in request.messages
+            ]
+
+            approach_result = await chat_approach.run(
+                messages=messages_dict,
+                stream=request.stream or False,
+                context=context,
+                session_state=session_state,
+            )
+
+            return approach_result
+
+        except Exception as e:
+            logger.error(f"Approach processing failed: {e}")
+            raise
 
 
-# Global instance
+# Create service instance
 chat_service = ChatService()

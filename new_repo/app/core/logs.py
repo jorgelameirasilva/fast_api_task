@@ -9,12 +9,7 @@ from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
 
 from pythonjsonlogger import jsonlogger
-
-AZURE_STORAGE_ACCOUNT = os.environ.get("AZURE_STORAGE_ACCOUNT")
-AZURE_STORAGE_CONTAINER = os.environ.get("DIAGNOSTICS_STORAGE_CONTAINER")
-AZURE_STORAGE_CLIENT_ID = os.environ.get("AZURE_STORAGE_CLIENT_ID")
-AZURE_STORAGE_CLIENT_SECRET = os.environ.get("AZURE_STORAGE_CLIENT_SECRET")
-AZURE_STORAGE_TENANT_ID = os.environ.get("AZURE_SEARCH_TENANT_ID")
+from .config import settings
 
 
 class BatchLogHandler(logging.Handler):
@@ -37,15 +32,15 @@ class BatchLogHandler(logging.Handler):
 
     def get_blob_client(self):
         blob_service_client = BlobServiceClient(
-            account_url=f"https://{AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
+            account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
             credential=ClientSecretCredential(
-                client_id=AZURE_STORAGE_CLIENT_ID,
-                client_secret=AZURE_STORAGE_CLIENT_SECRET,
-                tenant_id=AZURE_STORAGE_TENANT_ID,
+                client_id=settings.AZURE_STORAGE_CLIENT_ID,
+                client_secret=settings.AZURE_STORAGE_CLIENT_SECRET,
+                tenant_id=settings.AZURE_SEARCH_TENANT_ID,
             ),
         )
         blob_container_client = blob_service_client.get_container_client(
-            AZURE_STORAGE_CONTAINER
+            settings.DIAGNOSTICS_STORAGE_CONTAINER or settings.AZURE_STORAGE_CONTAINER
         )
         blob_client = blob_container_client.get_blob_client(self.blob_name)
 

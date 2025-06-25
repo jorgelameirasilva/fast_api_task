@@ -22,14 +22,13 @@ def get_auth_helper() -> AuthenticationHelper:
     """Get or create authentication helper instance"""
     global _auth_helper
     if _auth_helper is None:
-        use_authentication = bool(int(os.environ.get("REQUIRE_AUTHENTICATION", 1)))
         _auth_helper = AuthenticationHelper(
-            use_authentication=use_authentication,
-            server_app_id=settings.azure_server_app_id or "default",
-            server_app_secret=settings.azure_server_app_secret or "default",
-            client_app_id=settings.azure_client_app_id or "default",
-            tenant_id=settings.azure_tenant_id or "default",
-            token_cache_path=settings.token_cache_path,
+            use_authentication=settings.AZURE_USE_AUTHENTICATION,
+            server_app_id=settings.AZURE_SERVER_APP_ID or "default",
+            server_app_secret=settings.AZURE_SERVER_APP_SECRET or "default",
+            client_app_id=settings.AZURE_CLIENT_APP_ID or "default",
+            tenant_id=settings.AZURE_TENANT_ID or "default",
+            token_cache_path=settings.TOKEN_CACHE_PATH,
         )
     return _auth_helper
 
@@ -39,10 +38,8 @@ async def require_user(request: Request) -> Dict[str, Any]:
     FastAPI dependency to require authenticated user
     Replicates the exact same logic as the old token_required decorator
     """
-    REQUIRE_AUTHENTICATION = int(os.environ.get("REQUIRE_AUTHENTICATION", 1))
-
-    if REQUIRE_AUTHENTICATION:
-        AUDIENCE = os.environ.get("APP_AUTHENTICATION_CLIENT_ID", None)
+    if settings.AZURE_USE_AUTHENTICATION:
+        AUDIENCE = settings.AZURE_CLIENT_APP_ID
         ISSUER = "https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/v2.0"
         JWKS_URL = f"https://login.microsoftonline.com/53b7cac7-14be-46d4-be43-f2ad9244d901/discovery/v2.0/keys"
 
