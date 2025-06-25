@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logs import setup_logging
-from app.api.routes import chat, vote, session
+from app.api.routes import api_router
 from app.api.dependencies.auth import get_auth_setup
 from app.utils.mock_clients import cleanup_mock_clients
 
@@ -22,9 +22,11 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting HR Chatbot API...")
 
-    # Set use_mock_clients to True for development
-    settings.USE_MOCK_CLIENTS = True
-    logger.info("Using mock clients for development")
+    # Log the client configuration being used
+    if settings.USE_MOCK_CLIENTS:
+        logger.info("Using mock clients (development/testing mode)")
+    else:
+        logger.info("Using production Azure clients")
 
     yield
 
@@ -32,8 +34,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down HR Chatbot API...")
 
     try:
-        # Cleanup mock clients
-        await cleanup_mock_clients()
+        # Cleanup mock clients if they were used
+        if settings.USE_MOCK_CLIENTS:
+            await cleanup_mock_clients()
 
         # Stop logging listeners
         if listener:
@@ -77,10 +80,8 @@ else:
         allow_headers=["*"],
     )
 
-# Include API routes
-app.include_router(chat.router, tags=["chat"])
-app.include_router(vote.router, tags=["vote"])
-app.include_router(session.router, tags=["session"])
+# Include centralized API router
+app.include_router(api_router)
 
 
 # Health check endpoint

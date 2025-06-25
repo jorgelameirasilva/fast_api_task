@@ -13,7 +13,7 @@ from azure.identity import (
     ClientSecretCredential,
     get_bearer_token_provider,
 )
-from azure.storage.blob.aio import BlobServiceClient
+from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from app.core.config import settings
@@ -39,11 +39,32 @@ def get_chat_approach():
     return _chat_approach
 
 
+def get_blob_client_for_logging():
+    """Create blob client specifically for logging (sync version)"""
+    try:
+        blob_service_client = SyncBlobServiceClient(
+            account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
+            credential=ClientSecretCredential(
+                client_id=settings.AZURE_STORAGE_CLIENT_ID,
+                client_secret=settings.AZURE_STORAGE_CLIENT_SECRET,
+                tenant_id=settings.AZURE_SEARCH_TENANT_ID,
+            ),
+        )
+        blob_container_client = blob_service_client.get_container_client(
+            settings.AZURE_STORAGE_CONTAINER
+        )
+        return blob_container_client
+
+    except Exception as e:
+        logger.error(f"Failed to initialize blob client for logging: {str(e)}")
+        raise
+
+
 def _create_chat_approach():
     """Create and configure the chat approach"""
     try:
         # Get clients based on configuration
-        search_client, openai_client = _get_clients()
+        search_client, openai_client, embeddings_client = _get_clients()
 
         # Initialize approach
         from app.approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
@@ -55,6 +76,7 @@ def _create_chat_approach():
         approach = ChatReadRetrieveReadApproach(
             search_client=search_client,
             openai_client=openai_client,
+            embeddings_client=embeddings_client,
             chatgpt_model=chatgpt_model,
             chatgpt_deployment=settings.AZURE_OPENAI_CHATGPT_DEPLOYMENT,
             embedding_model=embedding_model,
@@ -77,10 +99,17 @@ def _get_clients():
     """Get appropriate clients based on configuration"""
     if settings.USE_MOCK_CLIENTS:
         logger.info("Using mock clients for testing")
-        return get_mock_search_client(), get_mock_openai_client()
+        return (
+            get_mock_search_client(),
+            get_mock_openai_client(),
+            get_mock_openai_client(),
+        )
     else:
         logger.info("Initializing production Azure clients")
-        return _get_azure_search_client(), _get_azure_openai_client()
+        search_client = _get_azure_search_client()
+        openai_client = _get_azure_openai_client()
+        embeddings_client = _get_azure_embeddings_client()
+        return search_client, openai_client, embeddings_client
 
 
 def _get_azure_search_client() -> SearchClient:
@@ -141,27 +170,35 @@ def _get_azure_openai_client() -> AsyncOpenAI:
         raise
 
 
-def _get_blob_container_client():
-    """Create blob container client exactly like old app.py"""
+def _get_azure_embeddings_client() -> AsyncOpenAI:
+    """Create Azure OpenAI embeddings client exactly like old app.py"""
     try:
-        blob_client = BlobServiceClient(
-            account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
-            credential=ClientSecretCredential(
-                client_id=settings.AZURE_STORAGE_CLIENT_ID,
-                client_secret=settings.AZURE_STORAGE_CLIENT_SECRET,
-                tenant_id=settings.AZURE_SEARCH_TENANT_ID,  # Uses search tenant ID like old app
-            ),
+        # Build APIM embeddings URL exactly like old app.py
+        APIM_EMBEDDINGS_URL = (
+            f"{settings.APIM_BASE_URL}/{settings.SECURE_GPT_EMB_DEPLOYMENT_ID}"
         )
 
-        blob_container_client = blob_client.get_container_client(
-            settings.AZURE_STORAGE_CONTAINER
+        # Use AsyncAzureOpenAI with APIM and OneAccount exactly like old app.py
+        embeddings_client = AsyncAzureOpenAI(
+            base_url=APIM_EMBEDDINGS_URL,
+            azure_ad_token_provider=get_bearer_token_provider(
+                OneAccount(
+                    settings.SECURE_GPT_CLIENT_ID,
+                    settings.SECURE_GPT_CLIENT_SECRET,
+                    settings.APIM_KEY,
+                    settings.APIM_ONELOGIN_URL,
+                )
+            ),
+            api_version=settings.SECURE_GPT_API_VERSION,
+            http_client=httpx.AsyncClient(verify=False),
+            default_headers={"Ocp-Apim-Subscription-Key": settings.APIM_KEY},
         )
 
         logger.info(
-            f"Blob container client initialized for: {settings.AZURE_STORAGE_ACCOUNT}"
+            f"Azure OpenAI embeddings client initialized with APIM: {settings.APIM_BASE_URL}"
         )
-        return blob_container_client
+        return embeddings_client
 
     except Exception as e:
-        logger.error(f"Failed to initialize blob container client: {str(e)}")
+        logger.error(f"Failed to initialize Azure OpenAI embeddings client: {str(e)}")
         raise

@@ -64,27 +64,29 @@ If you cannot generate a search query, return just the number 0.
         *,
         search_client: SearchClient,
         openai_client: AsyncOpenAI,
+        embeddings_client: AsyncOpenAI,
         chatgpt_model: str,
         chatgpt_deployment: Optional[str],
         embedding_deployment: Optional[str],
+        embedding_model: str,
         sourcepage_field: str,
         content_field: str,
         query_language: str,
         query_speller: str,
         chatgpt_token_limit: int = 4096,
-        embedding_model: str = "",
     ):
         self.search_client = search_client
         self.openai_client = openai_client
+        self.embeddings_client = embeddings_client
         self.chatgpt_model = chatgpt_model
         self.chatgpt_deployment = chatgpt_deployment
         self.embedding_deployment = embedding_deployment
+        self.embedding_model = embedding_model
         self.sourcepage_field = sourcepage_field
         self.content_field = content_field
         self.query_language = query_language
         self.query_speller = query_speller
         self.chatgpt_token_limit = chatgpt_token_limit
-        self.embedding_model = embedding_model
 
     @overload
     async def run_until_final_call(
@@ -180,12 +182,8 @@ If you cannot generate a search query, return just the number 0.
         # STEP 2: Retrieve relevant documents from the search index with the GPT optimized query
         vectors: list[VectorQuery] = []
         if has_vector:
-            query_vector = await self.openai_client.embeddings.create(
-                model=(
-                    self.embedding_deployment
-                    if self.embedding_deployment
-                    else self.embedding_model
-                ),
+            query_vector = await self.embeddings_client.embeddings.create(
+                model=self.embedding_model,
                 input=query_text,
             )
             query_vector = query_vector.data[0].embedding

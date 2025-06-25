@@ -5,11 +5,7 @@ import time
 import logging
 from logging.handlers import QueueHandler, QueueListener
 
-from azure.identity import ClientSecretCredential
-from azure.storage.blob import BlobServiceClient
-
 from pythonjsonlogger import jsonlogger
-from .config import settings
 
 
 class BatchLogHandler(logging.Handler):
@@ -24,32 +20,33 @@ class BatchLogHandler(logging.Handler):
         self._lock = threading.Lock()
         self.batch = []
         self._closed = False
+        self.blob_client = None  # Initialize blob_client attribute
+
+        # Initialize blob client
+        self._init_blob_client()
 
         self._flush_thread = threading.Thread(
             target=self._flush_periodically, daemon=True
         )
         self._flush_thread.start()
 
-    def get_blob_client(self):
-        blob_service_client = BlobServiceClient(
-            account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
-            credential=ClientSecretCredential(
-                client_id=settings.AZURE_STORAGE_CLIENT_ID,
-                client_secret=settings.AZURE_STORAGE_CLIENT_SECRET,
-                tenant_id=settings.AZURE_SEARCH_TENANT_ID,
-            ),
-        )
-        blob_container_client = blob_service_client.get_container_client(
-            settings.DIAGNOSTICS_STORAGE_CONTAINER or settings.AZURE_STORAGE_CONTAINER
-        )
-        blob_client = blob_container_client.get_blob_client(self.blob_name)
-
+    def _init_blob_client(self):
+        """Initialize the blob client"""
         try:
-            blob_client.create_append_blob()
-        except Exception:
-            # Blob already exists
-            pass
-        return blob_client
+            # Import here to avoid circular imports
+            from app.core.setup import get_blob_client_for_logging
+
+            blob_container_client = get_blob_client_for_logging()
+            self.blob_client = blob_container_client.get_blob_client(self.blob_name)
+
+            try:
+                self.blob_client.create_append_blob()
+            except Exception:
+                # Blob already exists
+                pass
+        except Exception as e:
+            print(f"Failed to initialize blob client: {e}")
+            self.blob_client = None
 
     def emit(self, record):
         msg = self.format(record) + "\n"
@@ -59,7 +56,7 @@ class BatchLogHandler(logging.Handler):
                 self._flush_batch()
 
     def _flush_batch(self):
-        if self.batch:
+        if self.batch and self.blob_client:
             logs_to_write = "".join(self.batch)
             try:
                 self.blob_client.append_block(logs_to_write.encode("utf-8"))

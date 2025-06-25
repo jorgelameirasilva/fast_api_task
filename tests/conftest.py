@@ -8,6 +8,15 @@ from fastapi.testclient import TestClient
 # Set environment variables BEFORE importing app
 os.environ["REQUIRE_AUTHENTICATION"] = "0"
 os.environ["USE_MOCK_CLIENTS"] = "true"
+# Set SECURE_GPT variables to prevent None model issues
+os.environ["SECURE_GPT_DEPLOYMENT_ID"] = "gpt-4o-test"
+os.environ["SECURE_GPT_EMB_DEPLOYMENT_ID"] = "text-embedding-ada-002-test"
+os.environ["SECURE_GPT_CLIENT_ID"] = "test-client-id"
+os.environ["SECURE_GPT_CLIENT_SECRET"] = "test-client-secret"
+os.environ["SECURE_GPT_API_VERSION"] = "2024-02-01"
+os.environ["APIM_KEY"] = "test-apim-key"
+os.environ["APIM_ONELOGIN_URL"] = "https://test-onelogin.com"
+os.environ["APIM_BASE_URL"] = "https://test-apim.azure-api.net"
 
 from app.main import app
 

@@ -14,7 +14,13 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CLIENT_ID: Optional[str] = None
     AZURE_STORAGE_CLIENT_SECRET: Optional[str] = None
     AZURE_STORAGE_ACCOUNT: str = "stdiagnosticsstorageprod"
-    AZURE_STORAGE_CONTAINER: str = "s-alt-0303-asia-or-us3-dlc13-webintelligentchatbot"
+
+    # Storage Container - matches old app.py logic exactly
+    # AZURE_STORAGE_CONTAINER gets its value from DIAGNOSTICS_STORAGE_CONTAINER
+    AZURE_STORAGE_CONTAINER: str = os.getenv(
+        "DIAGNOSTICS_STORAGE_CONTAINER",
+        "s-alt-0303-asia-or-us3-dlc13-webintelligentchatbot",
+    )
     DIAGNOSTICS_STORAGE_CONTAINER: Optional[str] = None
 
     # Azure Search
@@ -29,8 +35,18 @@ class Settings(BaseSettings):
     AZURE_OPENAI_CHATGPT_MODEL: str = "gpt-4o"
     AZURE_OPENAI_EMB_MODEL_NAME: str = "text-embedding-ada-002"
     AZURE_OPENAI_SERVICE: str = "saic-azu-eus2-npd-openaioc-specialservices"
-    AZURE_OPENAI_CHATGPT_DEPLOYMENT: str = "gpt-4o-chatbot-poc"
-    AZURE_OPENAI_EMB_DEPLOYMENT: str = "embeddings"
+
+    # These deployments are only set when OPENAI_HOST == "azure" (matches old app.py exactly)
+    AZURE_OPENAI_CHATGPT_DEPLOYMENT: Optional[str] = (
+        os.getenv("AZURE_OPENAI_CHATGPT_DEPLOYMENT", "gpt-4o-chatbot-poc")
+        if os.getenv("OPENAI_HOST", "azure") == "azure"
+        else None
+    )
+    AZURE_OPENAI_EMB_DEPLOYMENT: Optional[str] = (
+        os.getenv("AZURE_OPENAI_EMB_DEPLOYMENT", "embeddings")
+        if os.getenv("OPENAI_HOST", "azure") == "azure"
+        else None
+    )
 
     # Secure GPT Configuration
     SECURE_GPT_DEPLOYMENT_ID: Optional[str] = None
