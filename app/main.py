@@ -1,6 +1,7 @@
 """Main FastAPI application"""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logs import setup_logging
+from app.core.setup import setup_monitoring
 from app.api.routes import api_router
 from app.api.dependencies.auth import get_auth_setup
 from app.utils.mock_clients import cleanup_mock_clients
@@ -59,6 +61,14 @@ app = FastAPI(
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
 )
+
+# Configure Application Insights monitoring if available
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    setup_monitoring(app)
+else:
+    logger.info(
+        "Application Insights connection string not configured - monitoring disabled"
+    )
 
 # CORS middleware
 if settings.ALLOWED_ORIGIN:

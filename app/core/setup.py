@@ -16,6 +16,22 @@ from azure.identity import (
 from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
+# Optional OpenTelemetry imports for monitoring
+try:
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    OPENTELEMETRY_AVAILABLE = True
+except ImportError:
+    # OpenTelemetry not available - running in test mode
+    configure_azure_monitor = None
+    AioHttpClientInstrumentor = None
+    FastAPIInstrumentor = None
+    HTTPXClientInstrumentor = None
+    OPENTELEMETRY_AVAILABLE = False
+
 from app.core.config import settings
 from app.core.identity import OneAccount
 from app.utils.mock_clients import (
@@ -201,4 +217,29 @@ def _get_azure_embeddings_client() -> AsyncOpenAI:
 
     except Exception as e:
         logger.error(f"Failed to initialize Azure OpenAI embeddings client: {str(e)}")
+        raise
+
+
+def setup_monitoring(app):
+    """Configure Application Insights monitoring"""
+    if not OPENTELEMETRY_AVAILABLE:
+        logger.warning("OpenTelemetry not available - monitoring disabled")
+        return
+
+    try:
+        logger.info("Configuring Application Insights monitoring")
+        configure_azure_monitor()
+
+        # This tracks HTTP requests made by aiohttp:
+        AioHttpClientInstrumentor().instrument()
+
+        # This tracks HTTP requests made by httpx/openai:
+        HTTPXClientInstrumentor().instrument()
+
+        # This instruments FastAPI requests:
+        FastAPIInstrumentor.instrument_app(app)
+
+        logger.info("Application Insights monitoring configured successfully")
+    except Exception as e:
+        logger.error(f"Failed to configure Application Insights monitoring: {e}")
         raise

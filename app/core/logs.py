@@ -81,6 +81,21 @@ class BatchLogHandler(logging.Handler):
 
 
 def setup_logging(blob_name):
+    # Configure logging level based on environment (matches old app.py)
+    # Level should be one of https://docs.python.org/3/library/logging.html#logging-levels
+    default_level = "INFO"  # In development, log more verbosely
+    from app.core.config import settings
+
+    if settings.WEBSITE_HOSTNAME:  # In production, don't log as heavily
+        default_level = "WARNING"
+
+    # Set up basic logging configuration
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        level=getattr(logging, default_level),
+        datefmt="%m/%d/%Y %I:%M:%S %p",
+    )
+
     log_queue = queue.Queue(-1)
     queue_handler = QueueHandler(log_queue)
 
