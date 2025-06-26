@@ -35,6 +35,11 @@ class BatchLogHandler(logging.Handler):
         try:
             # Import here to avoid circular imports
             from app.core.setup import get_blob_client_for_logging
+            from app.core.config import settings
+
+            # Only initialize blob client in production
+            if not settings.WEBSITE_HOSTNAME:
+                return
 
             blob_container_client = get_blob_client_for_logging()
             self.blob_client = blob_container_client.get_blob_client(self.blob_name)
@@ -45,7 +50,11 @@ class BatchLogHandler(logging.Handler):
                 # Blob already exists
                 pass
         except Exception as e:
-            print(f"Failed to initialize blob client: {e}")
+            # Silently fail in development, log warning in production
+            from app.core.config import settings
+
+            if settings.WEBSITE_HOSTNAME:
+                print(f"Failed to initialize blob client: {e}")
             self.blob_client = None
 
     def emit(self, record):
@@ -96,27 +105,45 @@ def setup_logging(blob_name):
         datefmt="%m/%d/%Y %I:%M:%S %p",
     )
 
-    log_queue = queue.Queue(-1)
-    queue_handler = QueueHandler(log_queue)
-
-    azure_handler = BatchLogHandler(
-        blob_name=blob_name,
-        batch_size=20,
-        flush_interval=2.0,
-    )
-
-    formatter = jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s")
-    azure_handler.setFormatter(formatter)
-
-    listener = QueueListener(log_queue, azure_handler, respect_handler_level=True)
-    listener.start()
-
     logger = logging.getLogger("quart.app")
     logger.setLevel(logging.INFO)
-    logger.addHandler(queue_handler)
 
-    sio = logging.StreamHandler()
-    sio.setFormatter(formatter)
-    logger.addHandler(sio)
+    # Always add console/stream handler
+    console_formatter = jsonlogger.JsonFormatter(
+        "%(asctime)s %(levelname)s %(message)s"
+    )
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
 
-    return logger, listener, azure_handler
+    # Only set up Azure Blob logging in production (when WEBSITE_HOSTNAME is set)
+    if settings.WEBSITE_HOSTNAME:
+        try:
+            log_queue = queue.Queue(-1)
+            queue_handler = QueueHandler(log_queue)
+
+            azure_handler = BatchLogHandler(
+                blob_name=blob_name,
+                batch_size=20,
+                flush_interval=2.0,
+            )
+
+            azure_handler.setFormatter(console_formatter)
+
+            listener = QueueListener(
+                log_queue, azure_handler, respect_handler_level=True
+            )
+            listener.start()
+
+            logger.addHandler(queue_handler)
+
+            return logger, listener, azure_handler
+        except Exception as e:
+            # If Azure logging fails, continue with console logging only
+            logger.warning(
+                f"Failed to initialize Azure Blob logging, using console only: {e}"
+            )
+            return logger, None, None
+    else:
+        # Development mode - no Azure Blob logging
+        return logger, None, None

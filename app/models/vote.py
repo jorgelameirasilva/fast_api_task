@@ -99,9 +99,7 @@ class VoteResponse(BaseModel):
     """Vote response model"""
 
     user_query: str | dict = Field(..., description="User query")
-    message: str | dict = Field(
-        ..., description="Chatbot response (renamed from chatbot_response)"
-    )
+    chatbot_response: str | dict = Field(..., description="Chatbot response")
     upvote: int = Field(..., description="Upvote value")
     downvote: int = Field(..., description="Downvote value")
     count: int = Field(..., description="Count value")

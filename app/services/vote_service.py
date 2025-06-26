@@ -2,77 +2,77 @@
 
 import logging
 from typing import Any
+from app.models.vote import VoteRequest, VoteResponse
 
 logger = logging.getLogger(__name__)
 
 
 class VoteService:
-    """Service for handling vote operations"""
+    """Service for handling vote operations - matches original app.py functionality"""
 
-    def __init__(self):
-        # In-memory storage for demo purposes
-        self.votes: dict[str, dict[str, Any]] = {}
-
-    async def process_vote(self, vote_data: dict[str, Any]) -> dict[str, Any]:
+    async def process_vote(self, request: VoteRequest) -> VoteResponse:
         """
-        Process a vote request
+        Process a vote request - just log and return response like original app.py
 
         Args:
-            vote_data: Dictionary containing vote information
+            request: VoteRequest object containing vote information
 
         Returns:
-            Dictionary with processing result
+            VoteResponse: The vote response to return to client
         """
         try:
-            # Generate a simple vote ID
-            vote_id = f"vote_{len(self.votes) + 1}"
+            # Log the vote exactly like original app.py
+            if request.upvote == 1:
+                if request.count == 1:
+                    logger.info(
+                        "UPVOTE_RECORDED",
+                        extra={
+                            "user_query": request.user_query,
+                            "chatbot_response": request.chatbot_response,
+                        },
+                    )
+                elif request.count == -1:
+                    logger.info(
+                        "UPVOTE_REMOVED",
+                        extra={
+                            "user_query": request.user_query,
+                            "chatbot_response": request.chatbot_response,
+                        },
+                    )
+            elif request.downvote == 1:
+                if request.count == 1:
+                    logger.info(
+                        "DOWNVOTE_RECORDED",
+                        extra={
+                            "user_query": request.user_query,
+                            "chatbot_response": request.chatbot_response,
+                            "reason_multiple_choice": request.reason_multiple_choice,
+                            "additional_comments": request.additional_comments,
+                        },
+                    )
+                elif request.count == -1:
+                    logger.info(
+                        "DOWNVOTE_REMOVED",
+                        extra={
+                            "user_query": request.user_query,
+                            "chatbot_response": request.chatbot_response,
+                            "reason_multiple_choice": request.reason_multiple_choice,
+                            "additional_comments": request.additional_comments,
+                        },
+                    )
 
-            # Store the vote
-            self.votes[vote_id] = {
-                "id": vote_id,
-                "user_query": vote_data.get("user_query"),
-                "chatbot_response": vote_data.get("chatbot_response"),
-                "upvote": vote_data.get("upvote", 0),
-                "downvote": vote_data.get("downvote", 0),
-                "count": vote_data.get("count", 0),
-                "reason_multiple_choice": vote_data.get("reason_multiple_choice"),
-                "additional_comments": vote_data.get("additional_comments"),
-                "processed": True,
-            }
-
-            logger.info(f"Processed vote {vote_id}")
-
-            return {
-                "vote_id": vote_id,
-                "status": "success",
-                "message": "Vote processed successfully",
-            }
+            # Return the response exactly like original app.py
+            return VoteResponse(
+                user_query=request.user_query,
+                chatbot_response=request.chatbot_response,
+                upvote=request.upvote,
+                downvote=request.downvote,
+                count=request.count,
+            )
 
         except Exception as e:
             logger.error(f"Error processing vote: {str(e)}")
-            return {"status": "error", "message": f"Failed to process vote: {str(e)}"}
-
-    async def get_vote_stats(self) -> dict[str, Any]:
-        """Get voting statistics"""
-        try:
-            total_votes = len(self.votes)
-            upvotes = sum(
-                1 for vote in self.votes.values() if vote.get("upvote", 0) > 0
-            )
-            downvotes = sum(
-                1 for vote in self.votes.values() if vote.get("downvote", 0) > 0
-            )
-
-            return {
-                "total_votes": total_votes,
-                "upvotes": upvotes,
-                "downvotes": downvotes,
-                "status": "success",
-            }
-
-        except Exception as e:
-            logger.error(f"Error getting vote stats: {str(e)}")
-            return {"status": "error", "message": f"Failed to get vote stats: {str(e)}"}
+            raise
 
 
 # Global instance

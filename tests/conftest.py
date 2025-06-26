@@ -86,3 +86,109 @@ def sample_chat_request():
         "stream": False,
         "context": {},
     }
+
+
+@pytest.fixture
+def sample_vote_request():
+    """Sample vote request for testing"""
+    return {
+        "user_query": "What are the company's vacation policies?",
+        "chatbot_response": "Employees get 15 days of PTO annually according to company policy.",
+        "upvote": 1,
+        "downvote": 0,
+        "count": 1,
+        "reason_multiple_choice": None,
+        "additional_comments": None,
+    }
+
+
+@pytest.fixture
+def sample_downvote_request():
+    """Sample downvote request for testing"""
+    return {
+        "user_query": "How do I report an illness?",
+        "chatbot_response": "To report an illness, follow these steps:",
+        "upvote": 0,
+        "downvote": 1,
+        "count": 1,
+        "reason_multiple_choice": "Other",
+        "additional_comments": "More comments",
+    }
+
+
+@pytest.fixture
+def sample_empty_vote_request():
+    """Sample empty vote request for testing"""
+    return {
+        "user_query": {},
+        "chatbot_response": {},
+        "upvote": 0,
+        "downvote": 0,
+        "count": 1,
+    }
+
+
+@pytest.fixture
+def invalid_vote_inputs():
+    """Various invalid vote inputs for testing"""
+    return [
+        # Invalid upvote/downvote combinations
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": 1,
+            "downvote": 1,  # Both set to 1
+            "count": 1,
+        },
+        # Invalid count values
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": 1,
+            "downvote": 0,
+            "count": 2,  # Invalid count
+        },
+        # Invalid upvote value
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": "input",  # Invalid type
+            "downvote": 0,
+            "count": 1,
+        },
+        # Neither upvote nor downvote set
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": 0,
+            "downvote": 0,  # Both are 0
+            "count": 1,
+        },
+    ]
+
+
+@pytest.fixture
+def more_vote_inputs():
+    """Additional vote test cases"""
+    return [
+        # Valid upvote case
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": 1,
+            "downvote": 0,
+            "count": 1,
+            "data": "01/01/01",
+            "time": "00:00:00",
+            "email_address": "example.email@email.com",
+        },
+        # Valid downvote removal case
+        {
+            "user_query": "How do I report an illness?",
+            "chatbot_response": "To report an illness, follow these steps:",
+            "upvote": 0,
+            "downvote": 1,
+            "count": -1,  # Removal
+            "reason_multiple_choice": "input",
+        },
+    ]

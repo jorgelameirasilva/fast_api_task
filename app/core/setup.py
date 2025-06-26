@@ -57,6 +57,10 @@ def get_chat_approach():
 
 def get_blob_client_for_logging():
     """Create blob client specifically for logging (sync version)"""
+    # Only create blob client in production
+    if not settings.WEBSITE_HOSTNAME:
+        raise Exception("Blob client not available in development mode")
+
     try:
         blob_service_client = SyncBlobServiceClient(
             account_url=f"https://{settings.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net",
