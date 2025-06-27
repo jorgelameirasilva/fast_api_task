@@ -76,6 +76,9 @@ class ChatRequest(BaseModel):
     session_state: str | None = Field(
         default=None, description="Session state identifier"
     )
+    session_id: str | None = Field(
+        default=None, description="Session ID for conversation history"
+    )
 
     @field_validator("messages")
     @classmethod
@@ -93,3 +96,6 @@ class ChatResponse(BaseModel):
         default=None, description="Session state identifier"
     )
     context: ChatContext | None = Field(default=None, description="Response context")
+    session_id: str | None = Field(
+        default=None, description="Session ID for conversation history"
+    )

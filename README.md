@@ -266,3 +266,37 @@ Health check endpoint.
 
 All configuration is handled through environment variables. See `app/core/config.py` for the complete list of available settings.
 
+graph TD
+    A["Client Request<br/>POST /chat<br/>{messages, session_id}"] --> B["Chat Route<br/>api/routes/chat.py"]
+    B --> C["Chat Orchestrator<br/>orchestrators/chat_orchestrator.py"]
+    C --> D["Chat Service<br/>services/chat_service.py"]
+    
+    D --> E{"session_id<br/>provided?"}
+    E -->|Yes| F["Load Session<br/>session_service.get_session()"]
+    E -->|No| G["Create Session<br/>session_service.create_session()"]
+    
+    F --> H["Get Conversation History"]
+    G --> I["Empty History"]
+    
+    H --> J["Add User Message<br/>session_service.add_message_to_session()"]
+    I --> J
+    
+    J --> K["Process Chat<br/>approach.run()"]
+    
+    K --> L["Add Assistant Response<br/>session_service.add_message_to_session()"]
+    
+    L --> M["Return Response<br/>with session_id"]
+    
+    N["Session Service<br/>services/session_service.py"] --> O["Cosmos DB<br/>MongoDB Collection"]
+    
+    F -.-> N
+    G -.-> N
+    J -.-> N
+    L -.-> N
+    
+    P["Database Schema<br/>{_id, user_id, created_at,<br/>updated_at, messages[]}"] --> O
+    
+    style A fill:#e1f5fe
+    style M fill:#c8e6c9
+    style O fill:#fff3e0
+    style P fill:#f3e5f5

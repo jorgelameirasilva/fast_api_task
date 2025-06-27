@@ -10,7 +10,9 @@ from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
 )
+from app.schemas.session import SessionCreate, SessionMessage
 from app.core.setup import get_chat_approach
+from .session_service import session_service
 
 
 class ChatService:
@@ -22,37 +24,102 @@ class ChatService:
         self.session_storage: dict[str, Any] = {}
 
     async def process_chat(
-        self, request: ChatRequest, context: dict[str, Any]
+        self,
+        request: ChatRequest,
+        context: dict[str, Any],
+        user_id: str = "default_user",
     ) -> ChatResponse:
         """Process a chat request using approaches as primary method"""
         logger.info(f"Processing chat with {len(request.messages)} messages")
 
         try:
+            # Handle session management
+            session = None
+            conversation_history = []
+
+            if request.session_id:
+                # Load existing session
+                session = session_service.get_session(request.session_id, user_id)
+                if session:
+                    # Convert session messages to chat format for approach
+                    conversation_history = [
+                        {"role": msg.role, "content": msg.content}
+                        for msg in session.messages
+                    ]
+                    logger.info(
+                        f"Loaded session {request.session_id} with {len(conversation_history)} messages"
+                    )
+                else:
+                    logger.warning(
+                        f"Session {request.session_id} not found, creating new session"
+                    )
+
+            if not session:
+                # Create new session
+                session_create = SessionCreate(user_id=user_id)
+                session = session_service.create_session(session_create)
+                logger.info(f"Created new session: {session.id}")
+
+            # Add current user message to conversation history
+            user_message = request.messages[-1]  # Get the latest user message
+            conversation_history.append(
+                {"role": user_message.role, "content": user_message.content}
+            )
+
+            # Save user message to session
+            session_message = SessionMessage(
+                role=user_message.role, content=user_message.content
+            )
+            session_service.add_message_to_session(session.id, user_id, session_message)
+
+            # Get chat approach and process
             chat_approach = get_chat_approach()
             if not chat_approach:
                 raise ValueError("No chat approach configured")
 
             session_state = None
-
             if hasattr(request, "session_state") and request.session_state:
                 session_state = request.session_state
 
-            # Convert ChatMessage objects to dictionaries for the approach
-            messages_dict = [
-                {"role": msg.role, "content": msg.content} for msg in request.messages
-            ]
-
+            # Use full conversation history for approach
             approach_result = await chat_approach.run(
-                messages=messages_dict,
+                messages=conversation_history,
                 stream=request.stream or False,
                 context=context,
                 session_state=session_state,
             )
 
+            # Extract assistant response and save to session
+            assistant_message = None
+            if (
+                hasattr(approach_result, "choices")
+                and approach_result.choices
+                and approach_result.choices[0].message
+            ):
+                # ChatResponse format
+                assistant_message = approach_result.choices[0].message
+            elif isinstance(approach_result, dict) and "message" in approach_result:
+                # Dict format from approach
+                assistant_message = approach_result["message"]
+
+            if assistant_message:
+                session_message = SessionMessage(
+                    role=assistant_message.role, content=assistant_message.content
+                )
+                session_service.add_message_to_session(
+                    session.id, user_id, session_message
+                )
+
+            # Add session_id to response
+            if hasattr(approach_result, "session_id"):
+                approach_result.session_id = session.id
+            elif isinstance(approach_result, dict):
+                approach_result["session_id"] = session.id
+
             return approach_result
 
         except Exception as e:
-            logger.error(f"Approach processing failed: {e}")
+            logger.error(f"Chat processing failed: {e}")
             raise
 
 

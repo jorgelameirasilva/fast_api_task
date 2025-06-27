@@ -2,8 +2,9 @@
 
 import os
 import pytest
+import pytest_asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 # Set environment variables BEFORE importing app
 os.environ["REQUIRE_AUTHENTICATION"] = "0"
@@ -17,6 +18,8 @@ os.environ["SECURE_GPT_API_VERSION"] = "2024-02-01"
 os.environ["APIM_KEY"] = "test-apim-key"
 os.environ["APIM_ONELOGIN_URL"] = "https://test-onelogin.com"
 os.environ["APIM_BASE_URL"] = "https://test-apim.azure-api.net"
+# Set MongoDB URL to prevent connection issues
+os.environ["MONGODB_URL"] = "mongodb://localhost:27017/test_db"
 
 from app.main import app
 
@@ -70,10 +73,11 @@ def mock_search_client():
         yield mock_client
 
 
-@pytest.fixture
-def client():
-    """Create test client"""
-    return TestClient(app)
+@pytest_asyncio.fixture
+async def client():
+    """Create async test client"""
+    async with AsyncClient(app=app, base_url="http://testserver") as ac:
+        yield ac
 
 
 @pytest.fixture

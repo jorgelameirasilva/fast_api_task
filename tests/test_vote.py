@@ -2,12 +2,15 @@
 Comprehensive tests for vote endpoint matching the old repo
 """
 
+import pytest
 
-def test_vote_endpoint(client, sample_vote_request):
+
+@pytest.mark.asyncio
+async def test_vote_endpoint(client, sample_vote_request):
     """Test basic upvote functionality"""
 
     # Make request to vote endpoint
-    response = client.post("/vote", json=sample_vote_request)
+    response = await client.post("/vote", json=sample_vote_request)
 
     # Verify we get a successful response
     assert response.status_code == 200
@@ -31,11 +34,12 @@ def test_vote_endpoint(client, sample_vote_request):
     assert data["count"] == sample_vote_request["count"]
 
 
-def test_downvote_basic_functionality(client, sample_downvote_request):
+@pytest.mark.asyncio
+async def test_downvote_basic_functionality(client, sample_downvote_request):
     """Test basic downvote functionality"""
 
     # Make request to vote endpoint
-    response = client.post("/vote", json=sample_downvote_request)
+    response = await client.post("/vote", json=sample_downvote_request)
 
     # Verify we get a successful response
     assert response.status_code == 200
@@ -52,12 +56,13 @@ def test_downvote_basic_functionality(client, sample_downvote_request):
     assert data["count"] == 1
 
 
-def test_vote_endpoint_invalid_inputs(client, invalid_vote_inputs):
+@pytest.mark.asyncio
+async def test_vote_endpoint_invalid_inputs(client, invalid_vote_inputs):
     """Test vote endpoint with various invalid inputs"""
 
     for invalid_input in invalid_vote_inputs:
         # Make request to vote endpoint
-        response = client.post("/vote", json=invalid_input)
+        response = await client.post("/vote", json=invalid_input)
 
         # Should get validation error (422 for FastAPI validation errors)
         assert response.status_code == 422
@@ -72,25 +77,27 @@ def test_vote_endpoint_invalid_inputs(client, invalid_vote_inputs):
         assert len(data["detail"]) > 0
 
 
-def test_empty_post(client):
+@pytest.mark.asyncio
+async def test_empty_post(client):
     """Test empty POST request"""
 
     # Create empty test payload
     test_payload = {}
 
     # Make request to vote endpoint
-    response = client.post("/vote", json=test_payload)
+    response = await client.post("/vote", json=test_payload)
 
     # Should get validation error
     assert response.status_code == 422
 
 
-def test_more_inputs(client, more_vote_inputs):
+@pytest.mark.asyncio
+async def test_more_inputs(client, more_vote_inputs):
     """Test additional vote scenarios"""
 
     for test_input in more_vote_inputs:
         # Make request to vote endpoint
-        response = client.post("/vote", json=test_input)
+        response = await client.post("/vote", json=test_input)
 
         # Should be successful
         assert response.status_code == 200
@@ -114,7 +121,8 @@ def test_more_inputs(client, more_vote_inputs):
         assert data["count"] == test_input["count"]
 
 
-def test_vote_endpoint_invalid_inputs_detailed(client):
+@pytest.mark.asyncio
+async def test_vote_endpoint_invalid_inputs_detailed(client):
     """Test specific invalid input scenarios"""
 
     # Test invalid count values
@@ -129,7 +137,7 @@ def test_vote_endpoint_invalid_inputs_detailed(client):
             "count": invalid_count,
         }
 
-        response = client.post("/vote", json=test_payload)
+        response = await client.post("/vote", json=test_payload)
         assert response.status_code == 422
 
     # Test invalid string inputs
@@ -145,5 +153,5 @@ def test_vote_endpoint_invalid_inputs_detailed(client):
             "reason_multiple_choice": invalid_input,
         }
 
-        response = client.post("/vote", json=test_payload)
+        response = await client.post("/vote", json=test_payload)
         assert response.status_code == 422

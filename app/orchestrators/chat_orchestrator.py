@@ -39,7 +39,8 @@ class ChatOrchestrator:
             context = self._prepare_context(request, current_user)
 
             # Get result from chat service
-            result = await chat_service.process_chat(request, context)
+            user_id = current_user.get("oid", "default_user")
+            result = await chat_service.process_chat(request, context, user_id)
 
             # Format and return response
             return self._format_response(result)
