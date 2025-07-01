@@ -1,0 +1,32 @@
+graph TD
+    A[POST /chat] --> B[Authentication]
+    B --> C[ChatOrchestrator]
+    C --> D[ChatService]
+    
+    D --> E{Has session_id?}
+    E -->|Yes| F[Load History]
+    E -->|No| G[New Session]
+    
+    F --> H[SessionService.get_session_messages]
+    H --> I[Build Conversation]
+    G --> I
+    
+    I --> J[Save User Message]
+    J --> K[Process with LLM]
+    K --> L[Save Assistant Response]
+    L --> M[Return Response + session_id]
+    
+    subgraph "Database"
+        N[(MongoDB)]
+        N --> O[User Message Doc]
+        N --> P[Assistant Message Doc]
+    end
+    
+    J -.-> N
+    L -.-> N
+    H -.-> N
+    
+    style A fill:#e1f5fe
+    style M fill:#e8f5e8
+    style N fill:#fff3e0
+    style K fill:#f3e5f5 

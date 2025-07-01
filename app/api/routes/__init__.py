@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from . import chat, vote, session
+from . import chat, vote
 
 # Create main API router
 api_router = APIRouter()
@@ -10,6 +10,5 @@ api_router = APIRouter()
 # Include all route modules
 api_router.include_router(chat.router, tags=["chat"])
 api_router.include_router(vote.router, tags=["vote"])
-api_router.include_router(session.router, tags=["session"])
 
-__all__ = ["api_router", "chat", "vote", "session"]
+__all__ = ["api_router", "chat", "vote"]

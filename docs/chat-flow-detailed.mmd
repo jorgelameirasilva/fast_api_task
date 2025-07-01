@@ -1,0 +1,66 @@
+graph TD
+    A[User sends POST /chat request] --> B[FastAPI Router]
+    B --> C[Authentication Middleware]
+    C --> D[get_current_user]
+    D --> E[Chat Route Handler]
+    
+    E --> F[ChatOrchestrator.process_chat_request]
+    F --> G[Prepare Context]
+    G --> H[ChatService.process_chat]
+    
+    H --> I{Session ID provided?}
+    I -->|Yes| J[SessionService.get_session_messages]
+    I -->|No| K[Generate new UUID session_id]
+    
+    J --> L[Load conversation history from DB]
+    L --> M[Convert DB messages to chat format]
+    M --> N[Build conversation_history array]
+    
+    K --> N
+    N --> O[Add current user message to conversation]
+    O --> P[SessionService.add_message - Save user message]
+    
+    P --> Q[MongoDB: Insert user message document]
+    Q --> R[Get chat approach from setup]
+    R --> S[chat_approach.run with full conversation history]
+    
+    S --> T[LLM Processing]
+    T --> U[Generate assistant response]
+    U --> V[Extract assistant message from result]
+    V --> W[SessionService.add_message - Save assistant message]
+    
+    W --> X[MongoDB: Insert assistant message document]
+    X --> Y[Add session_id to response]
+    Y --> Z[ChatOrchestrator.format_response]
+    
+    Z --> AA[Convert to NDJSON format]
+    AA --> BB[StreamingResponse]
+    BB --> CC[Return to user]
+    
+    subgraph "Database Structure"
+        DD[MongoDB Collection: sessions]
+        DD --> EE["Document 1:<br/>{<br/>  _id: 'msg-uuid-1',<br/>  user_id: 'user123',<br/>  session_id: 'session-uuid',<br/>  message: {role: 'user', content: '...'},<br/>  created_at: '2024-01-01T10:00:00Z'<br/>}"]
+        DD --> FF["Document 2:<br/>{<br/>  _id: 'msg-uuid-2',<br/>  user_id: 'user123',<br/>  session_id: 'session-uuid',<br/>  message: {role: 'assistant', content: '...'},<br/>  created_at: '2024-01-01T10:01:00Z'<br/>}"]
+    end
+    
+    subgraph "Key Components"
+        GG[SessionService]
+        GG --> HH[add_message]
+        GG --> II[get_session_messages]
+        
+        JJ[ChatService]
+        JJ --> KK[process_chat]
+        
+        LL[ChatOrchestrator]
+        LL --> MM[process_chat_request]
+        LL --> NN[format_response]
+    end
+    
+    Q -.-> DD
+    X -.-> DD
+    L -.-> DD
+    
+    style A fill:#e1f5fe
+    style CC fill:#e8f5e8
+    style DD fill:#fff3e0
+    style T fill:#f3e5f5 

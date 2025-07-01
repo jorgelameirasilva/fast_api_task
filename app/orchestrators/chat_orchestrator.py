@@ -10,7 +10,6 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import chat_service
-from app.services.session_manager import SessionManager
 from app.utils import make_json_serializable
 
 logger = logging.getLogger(__name__)
@@ -21,9 +20,6 @@ class ChatOrchestrator:
     Orchestrates chat requests following SOLID principles
     Single Responsibility: Coordinate chat processing and response formatting
     """
-
-    def __init__(self, session_manager: SessionManager):
-        self.session_manager = session_manager
 
     async def process_chat_request(
         self, request: ChatRequest, current_user: dict[str, Any]
@@ -99,6 +95,4 @@ class ChatOrchestrator:
 
 
 # Global instance
-from app.services.session_manager import session_manager
-
-chat_orchestrator = ChatOrchestrator(session_manager=session_manager)
+chat_orchestrator = ChatOrchestrator()
