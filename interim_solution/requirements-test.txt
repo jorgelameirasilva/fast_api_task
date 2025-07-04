@@ -1,0 +1,37 @@
+# Minimal requirements for testing - excludes OpenTelemetry to avoid conflicts
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+aiofiles==23.2.1
+httpx==0.25.2
+
+# JWT Authentication
+PyJWT[crypto]==2.8.0
+
+# Azure dependencies (minimal for testing)
+azure-identity==1.15.0
+azure-search-documents==11.4.0b11
+azure-storage-blob==12.19.0
+
+# MongoDB
+pymongo==4.6.1
+
+# OpenAI and ML dependencies
+openai[datalib]>=1.3.6
+tiktoken==0.5.2
+aiohttp==3.9.1
+
+# Authentication (minimal)
+msal==1.26.0
+
+# Logging
+python-json-logger==2.0.7
+
+# Testing dependencies
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0 

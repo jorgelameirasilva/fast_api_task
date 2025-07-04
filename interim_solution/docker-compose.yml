@@ -1,0 +1,94 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: cosmos_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: testdb
+    volumes:
+      - mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - cosmos_network
+    command: mongod --noauth
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Run tests
+  test:
+    build: .
+    container_name: cosmos_test
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/testdb
+      - USE_MOCK_CLIENTS=true
+      - REQUIRE_AUTHENTICATION=0
+      - PYTHONPATH=/app
+    networks:
+      - cosmos_network
+    volumes:
+      - .:/app
+    command: ["python", "-m", "pytest", "tests/", "-v", "--tb=short"]
+
+  # Run demo script
+  demo:
+    build: .
+    container_name: cosmos_demo
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/testdb
+      - USE_MOCK_CLIENTS=true
+      - REQUIRE_AUTHENTICATION=0
+      - PYTHONPATH=/app
+    networks:
+      - cosmos_network
+    volumes:
+      - .:/app
+    command: ["python", "demo_cosmos_service.py"]
+
+  # Development server
+  dev:
+    build: .
+    container_name: cosmos_dev
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/testdb
+      - USE_MOCK_CLIENTS=true
+      - REQUIRE_AUTHENTICATION=0
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
+    networks:
+      - cosmos_network
+    volumes:
+      - .:/app
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
+
+volumes:
+  mongodb_data:
+
+networks:
+  cosmos_network:
+    driver: bridge
