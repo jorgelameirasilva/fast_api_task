@@ -1,0 +1,184 @@
+"""Main FastAPI application"""
+
+import logging
+import os
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.core.logs import setup_logging
+from app.core.setup import setup_monitoring
+from app.api.routes import api_router
+from app.api.dependencies.auth import get_auth_setup
+from app.utils.mock_clients import cleanup_mock_clients
+
+# Setup logging
+logger, listener, azure_handler = setup_logging("hr-chatbot.log")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
+    # Startup
+    logger.info("Starting HR Chatbot API...")
+
+    # Log the client configuration being used
+    if settings.USE_MOCK_CLIENTS:
+        logger.info("Using mock clients (development/testing mode)")
+    else:
+        logger.info("Using production Azure clients")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down HR Chatbot API...")
+
+    try:
+        # Cleanup mock clients if they were used
+        if settings.USE_MOCK_CLIENTS:
+            await cleanup_mock_clients()
+
+        # Stop logging listeners
+        if listener:
+            listener.stop()
+        if azure_handler:
+            azure_handler.close()
+
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+
+    logger.info("Shutdown complete")
+
+
+# Create FastAPI app
+app = FastAPI(
+    title=settings.app_name,
+    description="HR Chatbot API - FastAPI migration with authentication",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+)
+
+# Configure Application Insights monitoring if available
+if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    setup_monitoring(app)
+else:
+    logger.info(
+        "Application Insights connection string not configured - monitoring disabled"
+    )
+
+# CORS middleware
+if settings.ALLOWED_ORIGIN:
+    logger.info(f"CORS enabled for {settings.ALLOWED_ORIGIN}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.ALLOWED_ORIGIN],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+else:
+    # Allow specific origins for development to support credentials
+    development_origins = [
+        "http://localhost:5173",  # Vite default (your frontend)
+        "http://localhost:3000",  # React default
+        "http://localhost:5174",  # Vite alternative
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5174",
+    ]
+    logger.info(f"CORS enabled for development origins: {development_origins}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=development_origins,
+        allow_credentials=True,  # Allow credentials with specific origins
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+# Include centralized API router
+app.include_router(api_router)
+
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration"""
+    return {"status": "healthy", "service": "hr-chatbot-api"}
+
+
+# Auth setup endpoint (equivalent to original /auth_setup)
+@app.get("/auth_setup")
+async def auth_setup():
+    """Send MSAL.js settings to the client UI"""
+    try:
+        return JSONResponse(content=get_auth_setup())
+    except Exception as e:
+        logger.error(f"Failed to get auth setup: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to get authentication setup"
+        )
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "HR Chatbot API",
+        "version": "2.0.0",
+        "status": "running",
+        "endpoints": {
+            "chat": "/chat",
+            "vote": "/vote",
+            "auth_setup": "/auth_setup",
+            "health": "/health",
+            "docs": "/docs" if settings.debug else "disabled",
+        },
+    }
+
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler"""
+    logger.error(f"Global exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": f"The app encountered an error processing your request. Error type: {type(exc).__name__}"
+        },
+    )
+
+
+# Custom validation error handler for consistent error format
+@app.exception_handler(422)
+async def validation_exception_handler(request, exc):
+    """Handle validation errors with consistent format"""
+    logger.warning(f"Validation error: {exc}")
+
+    # Extract first error message to match original format
+    if hasattr(exc, "detail") and exc.detail:
+        if isinstance(exc.detail, list) and len(exc.detail) > 0:
+            error_msg = exc.detail[0].get("msg", "Validation error")
+        else:
+            error_msg = str(exc.detail)
+    else:
+        error_msg = "Validation error"
+
+    return JSONResponse(status_code=400, content={"error": error_msg})
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.debug,
+        log_level="info",
+    )
