@@ -281,7 +281,7 @@ Based on the available HR documents and company policies, I can provide guidance
 
 
 class MockAzureOpenAIClient(MockOpenAIClient):
-    """Mock Azure OpenAI client (inherits from MockOpenAIClient)"""
+    """Mock Azure OpenAI client that extends the base OpenAI mock"""
 
     def __init__(
         self,
@@ -295,12 +295,135 @@ class MockAzureOpenAIClient(MockOpenAIClient):
         self.azure_ad_token_provider = azure_ad_token_provider
         self.api_version = api_version
 
+    async def close(self):
+        """Close the Azure OpenAI client"""
+        pass
+
+
+class MockTableServiceClient:
+    """Mock Azure Storage Table Service client for development"""
+
+    def __init__(self, endpoint: str = None, credential: Any = None):
+        self.endpoint = endpoint
+        self.credential = credential
+        self._tables = {}  # Store table clients
+
+    def get_table_client(self, table_name: str):
+        """Get a mock table client for the specified table"""
+        if table_name not in self._tables:
+            self._tables[table_name] = MockTableClient(table_name)
+        return self._tables[table_name]
+
+    async def create_table_if_not_exists(self, table_name: str):
+        """Mock create table if not exists"""
+        await asyncio.sleep(0.05)  # Simulate network delay
+        if table_name not in self._tables:
+            self._tables[table_name] = MockTableClient(table_name)
+        return True
+
+    async def list_tables(self):
+        """Mock list tables"""
+        await asyncio.sleep(0.05)
+        return list(self._tables.keys())
+
+    async def close(self):
+        """Close the service client"""
+        pass
+
+
+class MockTableClient:
+    """Mock Azure Storage Table client for individual table operations"""
+
+    def __init__(self, table_name: str):
+        self.table_name = table_name
+        self._entities = {}  # Store entities in memory
+
+    async def create_entity(self, entity: dict):
+        """Mock create entity operation"""
+        await asyncio.sleep(0.1)  # Simulate network delay
+
+        # Simulate Azure Table Storage entity creation
+        entity_key = f"{entity.get('PartitionKey', '')}#{entity.get('RowKey', '')}"
+
+        # Add Azure Storage metadata
+        stored_entity = entity.copy()
+        stored_entity["etag"] = f"W/\"datetime'{uuid.uuid4()}'\""
+        stored_entity["timestamp"] = time.time()
+
+        self._entities[entity_key] = stored_entity
+
+        print(f"[MOCK TABLE] Created entity in {self.table_name}: {entity}")
+        return stored_entity
+
+    async def get_entity(self, partition_key: str, row_key: str):
+        """Mock get entity operation"""
+        await asyncio.sleep(0.05)
+        entity_key = f"{partition_key}#{row_key}"
+
+        if entity_key in self._entities:
+            return self._entities[entity_key]
+        else:
+            # Simulate ResourceNotFoundError
+            raise Exception(f"Entity not found: {entity_key}")
+
+    async def update_entity(self, entity: dict, mode="merge"):
+        """Mock update entity operation"""
+        await asyncio.sleep(0.1)
+        entity_key = f"{entity.get('PartitionKey', '')}#{entity.get('RowKey', '')}"
+
+        if entity_key in self._entities:
+            if mode == "merge":
+                self._entities[entity_key].update(entity)
+            else:
+                self._entities[entity_key] = entity
+
+            # Update metadata
+            self._entities[entity_key]["etag"] = f"W/\"datetime'{uuid.uuid4()}'\""
+            self._entities[entity_key]["timestamp"] = time.time()
+
+            print(f"[MOCK TABLE] Updated entity in {self.table_name}: {entity}")
+            return self._entities[entity_key]
+        else:
+            raise Exception(f"Entity not found for update: {entity_key}")
+
+    async def delete_entity(self, partition_key: str, row_key: str):
+        """Mock delete entity operation"""
+        await asyncio.sleep(0.05)
+        entity_key = f"{partition_key}#{row_key}"
+
+        if entity_key in self._entities:
+            del self._entities[entity_key]
+            print(f"[MOCK TABLE] Deleted entity from {self.table_name}: {entity_key}")
+        else:
+            raise Exception(f"Entity not found for deletion: {entity_key}")
+
+    async def query_entities(self, query_filter: str = None, select: List[str] = None):
+        """Mock query entities operation"""
+        await asyncio.sleep(0.1)
+
+        # Return all entities as a simple list (real implementation would apply filters)
+        entities = list(self._entities.values())
+        print(f"[MOCK TABLE] Queried {len(entities)} entities from {self.table_name}")
+
+        # Return as async generator
+        async def async_result_generator():
+            for entity in entities:
+                yield entity
+
+        return async_result_generator()
+
+    async def close(self):
+        """Close the table client"""
+        pass
+
 
 # Global client instances
 _search_client: Optional[MockSearchClient] = None
 _openai_client: Optional[MockOpenAIClient] = None
 _embeddings_client: Optional[MockOpenAIClient] = None
 _blob_container_client: Optional[MockBlobContainerClient] = None
+_mock_blob_container_client: Optional[MockBlobContainerClient] = None
+_mock_table_service_client: Optional[MockTableServiceClient] = None
 
 
 def get_mock_search_client() -> MockSearchClient:
@@ -328,16 +451,26 @@ def get_mock_embeddings_client() -> MockOpenAIClient:
 
 
 def get_mock_blob_container_client() -> MockBlobContainerClient:
-    """Get or create mock blob container client"""
-    global _blob_container_client
-    if _blob_container_client is None:
-        _blob_container_client = MockBlobContainerClient()
-    return _blob_container_client
+    """Get a mock blob container client for development"""
+    global _mock_blob_container_client
+    if _mock_blob_container_client is None:
+        _mock_blob_container_client = MockBlobContainerClient("mock-container")
+    return _mock_blob_container_client
+
+
+def get_mock_table_service_client() -> MockTableServiceClient:
+    """Get a mock Azure Storage Table service client for development"""
+    global _mock_table_service_client
+    if _mock_table_service_client is None:
+        _mock_table_service_client = MockTableServiceClient(
+            endpoint="https://mock-storage.table.core.windows.net"
+        )
+    return _mock_table_service_client
 
 
 async def cleanup_mock_clients():
     """Cleanup mock clients during shutdown"""
-    global _search_client, _openai_client, _embeddings_client, _blob_container_client
+    global _search_client, _openai_client, _embeddings_client, _blob_container_client, _mock_blob_container_client, _mock_table_service_client
 
     try:
         if _search_client:
@@ -355,6 +488,14 @@ async def cleanup_mock_clients():
         if _blob_container_client:
             _blob_container_client.close()
             _blob_container_client = None
+
+        if _mock_blob_container_client:
+            _mock_blob_container_client.close()
+            _mock_blob_container_client = None
+
+        if _mock_table_service_client:
+            await _mock_table_service_client.close()
+            _mock_table_service_client = None
 
     except Exception as e:
         print(f"Error during mock client cleanup: {e}")

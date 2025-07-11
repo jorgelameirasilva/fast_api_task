@@ -196,3 +196,11 @@ def more_vote_inputs():
             "reason_multiple_choice": "input",
         },
     ]
+@pytest.fixture
+def sample_feedback_request():
+    """Sample feedback request for testing"""
+    return {
+        "feedback": "Great application!",
+        "comment": "The chatbot is very helpful and provides accurate responses.",
+        "name": "Test User",
+    }
